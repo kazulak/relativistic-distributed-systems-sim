@@ -1,0 +1,7 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Error: TLC threw an unexpected exception.
+The exception was a java.util.concurrent.ExecutionException
+: java.rmi.server.ExportException: Listen failed on port: 0; nested exception is:
+java.net.SocketException: Operation not permitted
+Finished in 00s at (2026-07-18 18:00:00)
+

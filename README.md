@@ -1,25 +1,46 @@
 # Relativistic Distributed Systems Simulator
 
+## Research status
+
+This repository is being redesigned from an exploratory heartbeat prototype
+into a research-grade simulator. The typed physics kernel, generic simulation
+core, and condensed static-membership Raft state machine are available through
+the installed package. The older phase scripts and checked-in phase results
+remain exploratory and are not publication-ready evidence. The research
+questions, validity audit, and implementation gates are in
+[the publishable research plan](docs/PUBLISHABLE_RESEARCH_PLAN.md).
+
 This is a Julia 1.10 simulator for flat-spacetime distributed systems experiments. It contains:
 
-- A zero-allocation light-time solver for signal delivery between inertial worldlines.
-- Phase 0 solver tests for radial motion, transverse Doppler behavior, causal ordering, deterministic RNG, and allocation checks.
-- A minimal 5-node Raft baseline harness with fixed follower timeouts and FIFO per-sender delivery.
-- T_VAT helpers for Doppler-aware heartbeat timeout scaling.
+- typed Minkowski events, worldlines, proper clocks, light-cone solvers, and
+  Lorentz transforms;
+- `RelativisticDistributedSystemsSim.SimulationCore`, containing the scheduler,
+  local clocks, causal transport hooks, faults, and traces;
+- `RelativisticDistributedSystemsSim.Raft`, containing elections, replication,
+  majority commit, client operations, recovery, and invariant auditing; and
+- compatibility access to the exploratory heartbeat/T_VAT helpers while legacy
+  results are quarantined from scientific claims.
 
 ## Layout
 
 ```text
 relativistic-distributed-systems-sim/
   Project.toml
+  Manifest-v1.12.toml
   README.md
   src/
     RelativisticDistributedSystemsSim.jl
-    light_time.jl
+    Physics/
+    Simulation/
+    Protocols/Raft/
     raft_baseline.jl
     tvat.jl
   test/
-    test_solver.jl
+    runtests.jl
+    physics/
+    raft/
+  analysis/
+    Project.toml
   scripts/
     run_phase0.jl
     run_phase1.jl
@@ -36,18 +57,47 @@ From this directory:
 julia --project=. -e 'import Pkg; Pkg.instantiate()'
 ```
 
+Julia 1.12 selects the checked `Manifest-v1.12.toml`, preserving the validated
+1.12 dependency closure. There is deliberately no unversioned `Manifest.toml`:
+Julia 1.10 and other supported minor releases resolve the compatibility bounds
+in `Project.toml` independently instead of consuming 1.12 standard-library
+pins. Julia 1.10 remains an external CI compatibility gate.
+
+The root environment intentionally contains only dependencies needed to load
+and test the package. Plotting, data-frame, and legacy-script dependencies are
+isolated in `analysis/Project.toml`:
+
+```bash
+julia --project=analysis -e 'import Pkg; Pkg.instantiate()'
+```
+
 ## Run Tests
 
 ```bash
-julia --project=. test/test_solver.jl
+julia --project=. -e 'import Pkg; Pkg.test()'
 ```
 
-The solver test suite runs 10,000 deterministic random geometries with `StableRNG(1234)` and checks Newton convergence, analytic radial motion, transverse Doppler timing, invariant causal ordering, and zero allocations on the solver hot path.
+`Pkg.test()` is the canonical entry point and imports the installed package.
+For a focused local run, set `RDS_TEST_GROUP` to `physics` or `raft`:
+
+```bash
+RDS_TEST_GROUP=physics julia --project=. test/runtests.jl
+RDS_TEST_GROUP=raft julia --project=. test/runtests.jl
+```
+
+CI runs the canonical suite with bounds checking enabled and deprecation
+warnings treated as errors on Julia 1.10 and the current stable Julia release.
+
+## Legacy exploratory phase scripts
+
+The phase commands below use the separate analysis environment and retain
+direct source includes for historical reproducibility. They are not the
+publication analysis pipeline and their outputs are not paper evidence.
 
 ## Gather Phase 0 Baseline Results
 
 ```bash
-julia --project=. scripts/run_phase0.jl
+julia --project=analysis scripts/run_phase0.jl
 ```
 
 This writes:
@@ -59,7 +109,7 @@ results/phase0_baseline_YYYYMMDD_HHMMSS.csv
 ## Gather Phase 1 Degradation Results
 
 ```bash
-julia --project=. scripts/run_phase1.jl
+julia --project=analysis scripts/run_phase1.jl
 ```
 
 This runs the fixed-timeout Raft baseline for beta `0.0:0.05:0.9`, 100 deterministic seeds, and 10 seconds of coordinate time. Results are written to:
@@ -71,7 +121,7 @@ results/phase1_degradation_YYYYMMDD_HHMMSS.csv
 ## Gather Phase 2 T_VAT Results
 
 ```bash
-julia --project=. scripts/run_phase2.jl
+julia --project=analysis scripts/run_phase2.jl
 ```
 
 This runs the same beta and seed sweep with T_VAT heartbeat timeout scaling and +/-0.1% leader emission jitter. Results are written to:
@@ -83,7 +133,7 @@ results/phase2_tvat_YYYYMMDD_HHMMSS.csv
 ## Gather Phase 3 Causal Stress Results
 
 ```bash
-julia --project=. scripts/run_phase3.jl
+julia --project=analysis scripts/run_phase3.jl
 ```
 
 This runs the multi-leader simultaneity stress test and writes:

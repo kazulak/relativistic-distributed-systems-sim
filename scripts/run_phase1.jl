@@ -1,3 +1,7 @@
+# LEGACY EXPLORATORY SCRIPT: not part of the publication analysis pipeline.
+# It intentionally preserves historical direct source includes and must run
+# under `--project=analysis`; its output is not paper evidence.
+
 using Dates
 using StableRNGs
 

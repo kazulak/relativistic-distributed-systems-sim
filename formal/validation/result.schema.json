@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/relativistic-raft/formal-validation-result.schema.json",
+  "title": "Relativistic Raft formal-validation result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "started_at_utc",
+    "finished_at_utc",
+    "scope",
+    "overall_status",
+    "v5_gate",
+    "tool",
+    "repository",
+    "steps"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string" },
+    "started_at_utc": { "type": "string" },
+    "finished_at_utc": { "type": "string" },
+    "scope": { "enum": ["full", "partial"] },
+    "overall_status": {
+      "enum": ["PASS", "FAIL", "BLOCKED", "INCOMPLETE", "ERROR"]
+    },
+    "v5_gate": { "enum": ["PASS", "OPEN"] },
+    "tool": {
+      "type": "object",
+      "required": ["jar_path", "release", "sha256", "verified"],
+      "properties": {
+        "jar_path": { "type": "string" },
+        "release": { "type": "string" },
+        "sha256": { "type": "string" },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "required": ["root", "git_commit", "git_dirty", "manifest_sha256"],
+      "properties": {
+        "root": { "type": "string" },
+        "git_commit": { "type": ["string", "null"] },
+        "git_dirty": { "type": ["boolean", "null"] },
+        "manifest_sha256": { "type": "string" }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "reason",
+          "command",
+          "timeout_seconds",
+          "timed_out",
+          "exit_code",
+          "input_hashes",
+          "stdout_path",
+          "stderr_path"
+        ]
+      }
+    }
+  }
+}

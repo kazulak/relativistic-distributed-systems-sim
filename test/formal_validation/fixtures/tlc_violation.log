@@ -1,0 +1,4 @@
+Error: Invariant ElectionSafety is violated.
+The behavior up to this point is:
+State 1: <Initial predicate>
+

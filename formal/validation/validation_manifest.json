@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "tool": {
+    "name": "tla2tools.jar",
+    "release": "v1.7.4",
+    "tlc_version": "2.19 of 08 August 2024 (rev: 5a47802)",
+    "official_url": "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar",
+    "sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
+  },
+  "sany_runs": [
+    {
+      "id": "sany_relativistic_raft",
+      "module": "RelativisticRaft.tla",
+      "timeout_seconds": 30,
+      "max_heap_mb": 1024
+    },
+    {
+      "id": "sany_timer_adaptation",
+      "module": "TimerAdaptation.tla",
+      "timeout_seconds": 30,
+      "max_heap_mb": 1024
+    },
+    {
+      "id": "sany_commit_cap_regression",
+      "module": "CommitCapRegression.tla",
+      "timeout_seconds": 30,
+      "max_heap_mb": 1024
+    },
+    {
+      "id": "sany_coverage_trace",
+      "module": "CoverageTrace.tla",
+      "timeout_seconds": 30,
+      "max_heap_mb": 1024
+    }
+  ],
+  "tlc_runs": [
+    {
+      "id": "tlc_commit_cap_regression",
+      "module": "CommitCapRegression.tla",
+      "config": "models/CommitCapRegression.cfg",
+      "timeout_seconds": 30,
+      "max_heap_mb": 2048,
+      "workers": 1
+    },
+    {
+      "id": "tlc_coverage_trace",
+      "module": "CoverageTrace.tla",
+      "config": "models/CoverageTrace.cfg",
+      "timeout_seconds": 60,
+      "max_heap_mb": 2048,
+      "workers": 1
+    },
+    {
+      "id": "tlc_raft3_quick",
+      "module": "RelativisticRaft.tla",
+      "config": "models/Raft3Quick.cfg",
+      "timeout_seconds": 300,
+      "max_heap_mb": 4096,
+      "workers": 4
+    },
+    {
+      "id": "tlc_timer3_quick",
+      "module": "TimerAdaptation.tla",
+      "config": "models/Timer3Quick.cfg",
+      "timeout_seconds": 300,
+      "max_heap_mb": 4096,
+      "workers": 4
+    },
+    {
+      "id": "tlc_raft3_safety",
+      "module": "RelativisticRaft.tla",
+      "config": "models/Raft3Safety.cfg",
+      "timeout_seconds": 1800,
+      "max_heap_mb": 4096,
+      "workers": 4
+    }
+  ]
+}
+

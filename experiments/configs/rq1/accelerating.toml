@@ -1,0 +1,10 @@
+schema = "research-rq1-v1"
+family = "AcceleratingBaseline"
+cluster_sizes = [3, 5, 7]
+rho = 0.2
+theta_min = 5.0
+theta_max = 7.0
+beta = 0.0
+a_star = 0.02
+loss_probability = 0.0
+description = "Outward uniformly accelerated members around an inertial center."

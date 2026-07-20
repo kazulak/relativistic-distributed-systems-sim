@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Julia ${{ matrix.julia-version }}
+    runs-on: ubuntu-latest
+    env:
+      JULIA_DEPOT_PATH: ${{ runner.temp }}/rds-julia-depot
+    strategy:
+      fail-fast: false
+      matrix:
+        julia-version:
+          - "1.10"
+          - "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+      - name: Prepare clean writable depot
+        run: mkdir -p "$JULIA_DEPOT_PATH"
+      - name: Verify repository lockfile policy
+        run: |
+          test ! -e Manifest.toml
+          test -f Manifest-v1.12.toml
+      - name: Instantiate core environment
+        run: julia --project=. --startup-file=no -e 'import Pkg; Pkg.instantiate()'
+      - name: Smoke-test installed component namespaces
+        run: >-
+          julia --project=. --startup-file=no -e
+          'using RelativisticDistributedSystemsSim;
+          @assert SimulationCore === RelativisticDistributedSystemsSim.SimulationCore;
+          @assert Raft === RelativisticDistributedSystemsSim.Raft;
+          @assert parentmodule(SimulationCore) === RelativisticDistributedSystemsSim;
+          @assert parentmodule(Raft) === RelativisticDistributedSystemsSim;
+          @assert isdefined(SimulationCore, :Scheduler);
+          @assert isdefined(Raft, :RaftNode)'
+      - name: Run canonical package tests strictly
+        run: >-
+          julia --project=. --startup-file=no -e
+          'import Pkg;
+          Pkg.test(; julia_args=["--check-bounds=yes", "--depwarn=error", "--startup-file=no"])'

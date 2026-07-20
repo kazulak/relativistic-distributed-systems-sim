@@ -1,3 +1,7 @@
+# LEGACY EXPLORATORY SCRIPT: not part of the publication analysis pipeline.
+# It consumes historical phase outputs under `--project=analysis`; its plots
+# and summaries are not paper evidence.
+
 using CSV
 using DataFrames
 using Dates
