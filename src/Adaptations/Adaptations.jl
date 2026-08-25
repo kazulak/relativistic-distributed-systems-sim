@@ -1,4 +1,4 @@
-module RelativisticAdaptations
+module Adaptations
 
 include("Types.jl")
 include("TimingPolicies.jl")

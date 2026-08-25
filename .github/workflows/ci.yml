@@ -38,10 +38,16 @@ jobs:
           'using RelativisticDistributedSystemsSim;
           @assert SimulationCore === RelativisticDistributedSystemsSim.SimulationCore;
           @assert Raft === RelativisticDistributedSystemsSim.Raft;
+          @assert Adaptations === RelativisticDistributedSystemsSim.Adaptations;
+          @assert Research === RelativisticDistributedSystemsSim.Research;
           @assert parentmodule(SimulationCore) === RelativisticDistributedSystemsSim;
           @assert parentmodule(Raft) === RelativisticDistributedSystemsSim;
+          @assert parentmodule(Adaptations) === RelativisticDistributedSystemsSim;
+          @assert parentmodule(Research) === RelativisticDistributedSystemsSim;
           @assert isdefined(SimulationCore, :Scheduler);
-          @assert isdefined(Raft, :RaftNode)'
+          @assert isdefined(Raft, :RaftNode);
+          @assert isdefined(Adaptations, :TimingPolicySet);
+          @assert isdefined(Research, :run_scenario)'
       - name: Run canonical package tests strictly
         run: >-
           julia --project=. --startup-file=no -e

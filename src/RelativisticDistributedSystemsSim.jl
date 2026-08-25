@@ -7,16 +7,21 @@ include("Physics/LightCone.jl")
 include("Physics/Lorentz.jl")
 
 # Keep public component namespaces in dependency order: the protocol may consume
-# simulation interfaces, while neither component is allowed to reach into the
+# simulation interfaces, the research harness composes physics, simulation, and
+# protocol components, and neither component is allowed to reach into the
 # package's legacy compatibility harnesses below.
 include("Simulation/Simulation.jl")
 include("Protocols/Raft/Raft.jl")
+include("Adaptations/Adaptations.jl")
+include("Research/Research.jl")
 
 include("raft_baseline.jl")
 include("tvat.jl")
 
 export SimulationCore,
     Raft,
+    Adaptations,
+    Research,
     MinkowskiSpacetime,
     SpacetimeEvent,
     NumericalConditioningError,

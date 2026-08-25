@@ -1,7 +1,6 @@
 using Test
-
-include(joinpath(@__DIR__, "../../src/Adaptations/Adaptations.jl"))
-using .RelativisticAdaptations
+using RelativisticDistributedSystemsSim
+using RelativisticDistributedSystemsSim.Adaptations
 
 @testset "Relativistic adaptation policies" begin
     include("timing.jl")
