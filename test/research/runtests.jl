@@ -141,4 +141,6 @@ end
     @test all_safety(censored.safety)
 end
 
+include("metamorphic.jl")
+
 end

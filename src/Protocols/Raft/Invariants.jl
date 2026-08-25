@@ -273,8 +273,14 @@ function _record_leader_commit!(
             node.id,
         )
         prior = get(audit.commit_provenance, index, nothing)
-        !isnothing(prior) && prior != record && throw(
-            InvariantViolation(["conflicting leader provenance for committed index $index"]),
+        # A later leader may lawfully advance its commitIndex across an index
+        # first committed under an earlier term; the invariant is that every
+        # commit event for one index carries the SAME ENTRY, not the same
+        # committer.
+        !isnothing(prior) && prior.entry != record.entry && throw(
+            InvariantViolation([
+                "conflicting committed entry provenance for index $index",
+            ]),
         )
         audit.commit_provenance[index] = record
     end

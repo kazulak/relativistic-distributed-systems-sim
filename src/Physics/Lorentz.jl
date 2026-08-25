@@ -595,7 +595,11 @@ function lorentz_transform_velocity(
         throw(NumericalConditioningError("boosted velocity is not representably timelike"))
     end
     recovered_wide = _wide_boost_velocity(boost, transformed, true)
-    scale = max(_spatial_norm(converted), boost.spacetime.c * eps(T))
+    scale = max(
+        _spatial_norm(converted),
+        _spatial_norm(transformed),
+        boost.spacetime.c * eps(T),
+    )
     error = hypot(
         T(recovered_wide[1]) - converted[1],
         T(recovered_wide[2]) - converted[2],
