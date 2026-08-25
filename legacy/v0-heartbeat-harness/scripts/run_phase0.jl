@@ -5,9 +5,10 @@
 using Dates
 using StableRNGs
 
-include("../src/light_time.jl")
-include("../src/raft_baseline.jl")
-include("../src/tvat.jl")
+const REPO_SRC = normpath(joinpath(@__DIR__, "..", "..", "..", "src"))
+include(joinpath(REPO_SRC, "light_time.jl"))
+include(joinpath(REPO_SRC, "raft_baseline.jl"))
+include(joinpath(REPO_SRC, "tvat.jl"))
 
 function write_csv(path::AbstractString, header, rows)
     open(path, "w") do io

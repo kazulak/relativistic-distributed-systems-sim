@@ -5,9 +5,11 @@
 This repository is being redesigned from an exploratory heartbeat prototype
 into a research-grade simulator. The typed physics kernel, generic simulation
 core, and condensed static-membership Raft state machine are available through
-the installed package. The older phase scripts and checked-in phase results
-remain exploratory and are not publication-ready evidence. The research
-questions, validity audit, and implementation gates are in
+the installed package. The original exploratory harness (scripts, results,
+figures, and paper placeholders) is quarantined under
+[legacy/v0-heartbeat-harness](legacy/v0-heartbeat-harness) and is not
+publication-ready evidence. The research questions, validity audit, and
+implementation gates are in
 [the publishable research plan](docs/PUBLISHABLE_RESEARCH_PLAN.md).
 
 This is a Julia 1.10 simulator for flat-spacetime distributed systems experiments. It contains:
@@ -17,7 +19,12 @@ This is a Julia 1.10 simulator for flat-spacetime distributed systems experiment
 - `RelativisticDistributedSystemsSim.SimulationCore`, containing the scheduler,
   local clocks, causal transport hooks, faults, and traces;
 - `RelativisticDistributedSystemsSim.Raft`, containing elections, replication,
-  majority commit, client operations, recovery, and invariant auditing; and
+  majority commit, client operations, recovery, and invariant auditing;
+- `RelativisticDistributedSystemsSim.Research`, the deterministic standard-Raft
+  scenario harness for the RQ1 experiments, with proper-time clocks, causal
+  transport, client workloads, and safety oracles;
+- `RelativisticDistributedSystemsSim.Adaptations`, fingerprintable timing,
+  redundancy, placement, and cost-quality policy tooling; and
 - compatibility access to the exploratory heartbeat/T_VAT helpers while legacy
   results are quarantined from scientific claims.
 
@@ -28,25 +35,34 @@ relativistic-distributed-systems-sim/
   Project.toml
   Manifest-v1.12.toml
   README.md
+  LICENSE
+  CITATION.cff
+  docs/
   src/
     RelativisticDistributedSystemsSim.jl
     Physics/
     Simulation/
     Protocols/Raft/
-    raft_baseline.jl
-    tvat.jl
+    Adaptations/
+    Research/
+    light_time.jl        # legacy compatibility surface
+    raft_baseline.jl     # legacy compatibility surface
+    tvat.jl              # legacy compatibility surface
   test/
     runtests.jl
     physics/
     raft/
+    research/
+    adaptations/
+  experiments/
+    run_rq1.jl
+    configs/rq1/
+  formal/                # TLA+ models and validation harness inputs
+  scripts/               # formal-validation harness entry points
   analysis/
     Project.toml
-  scripts/
-    run_phase0.jl
-    run_phase1.jl
-    run_phase2.jl
-    run_phase3.jl
-  results/
+  legacy/
+    v0-heartbeat-harness/
 ```
 
 ## Setup
@@ -78,106 +94,56 @@ julia --project=. -e 'import Pkg; Pkg.test()'
 ```
 
 `Pkg.test()` is the canonical entry point and imports the installed package.
-For a focused local run, set `RDS_TEST_GROUP` to `physics` or `raft`:
+For a focused local run, set `RDS_TEST_GROUP` to `physics`, `raft`,
+`research`, or `adaptations`:
 
 ```bash
 RDS_TEST_GROUP=physics julia --project=. test/runtests.jl
 RDS_TEST_GROUP=raft julia --project=. test/runtests.jl
+RDS_TEST_GROUP=research julia --project=. test/runtests.jl
+RDS_TEST_GROUP=adaptations julia --project=. test/runtests.jl
 ```
+
+## Run an RQ1 Scenario
+
+The deterministic standard-Raft scenario harness lives in the `Research`
+component namespace. See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) for the
+scenario families, configuration schema, and metric definitions.
+
+```bash
+julia --project=. experiments/run_rq1.jl all 3 7
+```
+
+Families: `control | static | receding | accelerating | stress | all`.
+Optional arguments are cluster size and seed. The command exits nonzero if a
+run does not complete with clean safety flags.
 
 CI runs the canonical suite with bounds checking enabled and deprecation
 warnings treated as errors on Julia 1.10 and the current stable Julia release.
 
-## Legacy exploratory phase scripts
+## Legacy exploratory harness
 
-The phase commands below use the separate analysis environment and retain
-direct source includes for historical reproducibility. They are not the
-publication analysis pipeline and their outputs are not paper evidence.
+The original heartbeat/T_VAT phase scripts, their raw CSV outputs, generated
+figures, and placeholder paper tables are quarantined under
+[legacy/v0-heartbeat-harness](legacy/v0-heartbeat-harness). They are
+exploratory material: the audit in the research plan invalidated them as a
+Raft study, and none of their numbers may be used as evidence. See that
+directory's README for why it was quarantined and how to re-run it.
 
-## Gather Phase 0 Baseline Results
-
-```bash
-julia --project=analysis scripts/run_phase0.jl
-```
-
-This writes:
-
-```text
-results/phase0_baseline_YYYYMMDD_HHMMSS.csv
-```
-
-## Gather Phase 1 Degradation Results
-
-```bash
-julia --project=analysis scripts/run_phase1.jl
-```
-
-This runs the fixed-timeout Raft baseline for beta `0.0:0.05:0.9`, 100 deterministic seeds, and 10 seconds of coordinate time. Results are written to:
-
-```text
-results/phase1_degradation_YYYYMMDD_HHMMSS.csv
-```
-
-## Gather Phase 2 T_VAT Results
-
-```bash
-julia --project=analysis scripts/run_phase2.jl
-```
-
-This runs the same beta and seed sweep with T_VAT heartbeat timeout scaling and +/-0.1% leader emission jitter. Results are written to:
-
-```text
-results/phase2_tvat_YYYYMMDD_HHMMSS.csv
-```
-
-## Gather Phase 3 Causal Stress Results
-
-```bash
-julia --project=analysis scripts/run_phase3.jl
-```
-
-This runs the multi-leader simultaneity stress test and writes:
-
-```text
-results/phase3_causal_YYYYMMDD_HHMMSS.csv
-```
-
-Phase 0, 1, and 2 CSV columns:
-
-- `seed`: deterministic trial seed.
-- `beta`: leader velocity as a fraction of `c_sim`.
-- `duration`: coordinate-time simulation duration.
-- `heartbeats_sent`: scheduled leader heartbeats.
-- `heartbeats_delivered`: heartbeats delivered before the run horizon.
-- `false_elections`: follower timeouts that become candidate transitions.
-- `safety_violations`: non-lightlike network deliveries by invariant interval check.
-- `availability`: fraction of simulated time with no follower in candidate state.
-
-Phase 3 CSV columns:
-
-- `seed`: deterministic trial seed.
-- `beta_pair`: pair of leader velocities compared.
-- `total_writes`: writes evaluated for that pair.
-- `spacelike_writes`: write pairs with invariant interval `s^2 < 0`.
-- `causal_violation_rate`: `spacelike_writes / total_writes`.
-- `merge_overhead_ms`: deterministic merge overhead accumulated for spacelike writes.
-
-## Read Results
-
-In Julia:
-
-```julia
-rows = readlines("results/phase1_degradation_YYYYMMDD_HHMMSS.csv")
-header = split(rows[1], ",")
-data = split.(rows[2:end], ",")
-```
-
-Or with standard shell tools:
-
-```bash
-column -s, -t results/phase*_*.csv | less -S
-```
+The `light_time.jl`, `raft_baseline.jl`, and `tvat.jl` sources remain in
+`src/` only as a tested compatibility surface for the scalar solver helpers;
+they are not part of the research pipeline.
 
 ## Notes
 
-Protocol decisions and validation checks use the Minkowski interval with signature `(+---)`. The simulation uses one inertial coordinate frame as the scheduler, while network delivery is determined by `solve_light_time`.
+Protocol decisions and validation checks use the Minkowski interval with signature `(+---)`. The simulation uses one inertial coordinate frame as the scheduler, while network delivery is determined by causal light-cone solving.
+
+## License
+
+[MIT](LICENSE)
+
+## Citation
+
+If you use this software, please cite it via the metadata in
+[CITATION.cff](CITATION.cff).
+

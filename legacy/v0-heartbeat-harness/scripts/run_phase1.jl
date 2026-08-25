@@ -5,8 +5,9 @@
 using Dates
 using StableRNGs
 
-include("../src/light_time.jl")
-include("../src/raft_baseline.jl")
+const REPO_SRC = normpath(joinpath(@__DIR__, "..", "..", "..", "src"))
+include(joinpath(REPO_SRC, "light_time.jl"))
+include(joinpath(REPO_SRC, "raft_baseline.jl"))
 
 const PHASE1_DURATION = 10.0
 const PHASE1_C_SIM = 100.0
