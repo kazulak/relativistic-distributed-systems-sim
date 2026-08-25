@@ -62,7 +62,7 @@ class ManifestTests(unittest.TestCase):
         manifest = HARNESS.load_manifest()
         declared = {run["config"] for run in manifest["tlc_runs"]}
         checked_in = {
-            str(path.relative_to(HARNESS.FORMAL_DIR))
+            path.relative_to(HARNESS.FORMAL_DIR).as_posix()
             for path in (HARNESS.FORMAL_DIR / "models").glob("*.cfg")
         }
         self.assertEqual(declared, checked_in)

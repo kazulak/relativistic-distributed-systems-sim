@@ -95,13 +95,14 @@ julia --project=. -e 'import Pkg; Pkg.test()'
 
 `Pkg.test()` is the canonical entry point and imports the installed package.
 For a focused local run, set `RDS_TEST_GROUP` to `physics`, `raft`,
-`research`, or `adaptations`:
+`research`, `adaptations`, or `differential`:
 
 ```bash
 RDS_TEST_GROUP=physics julia --project=. test/runtests.jl
 RDS_TEST_GROUP=raft julia --project=. test/runtests.jl
 RDS_TEST_GROUP=research julia --project=. test/runtests.jl
 RDS_TEST_GROUP=adaptations julia --project=. test/runtests.jl
+RDS_TEST_GROUP=differential julia --project=. test/runtests.jl
 ```
 
 ## Run an RQ1 Scenario

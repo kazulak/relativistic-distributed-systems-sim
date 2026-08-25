@@ -210,7 +210,7 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
                 raise ValueError(f"{run['id']} has no positive worker count")
     declared = {run["config"] for run in manifest.get("tlc_runs", [])}
     checked_in = {
-        str(path.relative_to(FORMAL_DIR))
+        path.relative_to(FORMAL_DIR).as_posix()
         for path in (FORMAL_DIR / "models").glob("*.cfg")
     }
     if declared != checked_in:

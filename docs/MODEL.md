@@ -253,7 +253,14 @@ Validation contains four distinct forms of evidence:
 - an independent analytic oscillatory proper-time oracle designed to expose
   quadrature aliasing;
 - Lorentz metamorphic checks of intervals, receptions, velocities, and proper
-  time.
+  time;
+- scenario-level metamorphic equivalence: a whole-scenario spatial rotation
+  preserves the full causal trace, and whole-scenario boosts preserve
+  protocol decisions, client-visible results, safety flags, and proper-time
+  metrics. Transport-profile delays and experiment-window boundaries are
+  scheduler-frame model inputs and are excluded from boost-equivalence
+  claims; on the co-located control their proper-time effect is verified to
+  dilate by exactly the boost's gamma factor.
 
 These checks establish numerical agreement within their tested domains. They
 do not prove correctness for every user-supplied worldline. Extended-precision

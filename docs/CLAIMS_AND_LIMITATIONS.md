@@ -79,6 +79,13 @@ unchecked physics residual is reported as incomplete, not a pass. A safety
 invariant that is never exercised by an election/commit/application witness is
 not treated as adequate publication evidence merely because it held vacuously.
 
+Status note, 2026-08-25: every gate above now has recorded evidence; see
+[VALIDATION_GATES.md](VALIDATION_GATES.md) for per-gate pointers, the V2
+defect found and repaired during gate work, and the scope limits of the
+metamorphic and differential evidence. The claim register rows in Section 2
+remain "Target; not established" until their full evidence columns are met;
+gate completion alone does not promote them.
+
 ### Adaptation gate
 
 Implement and tune fixed, worst-case, backoff, EWMA/quantile, and phi-accrual

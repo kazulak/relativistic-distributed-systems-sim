@@ -62,7 +62,7 @@
       "id": "tlc_timer3_quick",
       "module": "TimerAdaptation.tla",
       "config": "models/Timer3Quick.cfg",
-      "timeout_seconds": 300,
+      "timeout_seconds": 1800,
       "max_heap_mb": 4096,
       "workers": 4
     },

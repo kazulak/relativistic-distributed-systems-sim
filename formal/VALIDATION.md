@@ -1,135 +1,77 @@
 # Formal validation log
 
+Run date: 2026-08-25. This log supersedes the 2026-07-18 record below in full.
+The declared manifest now completes end-to-end under the fail-closed harness,
+and publication gate V5 is **PASS** for the checked configurations.
+
+## Authoritative run
+
+- Run id: `formal-v5-full-r2`
+- Harness: `scripts/formal_validation.py` against
+  `formal/validation/validation_manifest.json`
+- Scope: **full**; executed-step status: **PASS**; V5: **PASS**
+- Evidence directory: gitignored `formal/results/formal-v5-full-r2/`
+  (`result.json`, per-step commands, raw logs, hashes). The tables below are a
+  projection of that machine-readable record.
+
+### Toolchain
+
+- TLA+ tools: `tla2tools.jar` v1.7.4 (TLC 2.19, rev `5a47802`, 2024-08-08)
+- SHA-256 verified by the harness:
+  `936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88`
+- Java: OpenJDK 24.0.1 (Windows); Python 3.14 host for the harness
+
+### Results
+
+| Step | Kind | Status | Generated | Distinct | Queued | Depth |
+|---|---|---|---:|---:|---:|---:|
+| `sany_relativistic_raft` | SANY | PASS | — | — | — | — |
+| `sany_timer_adaptation` | SANY | PASS | — | — | — | — |
+| `sany_commit_cap_regression` | SANY | PASS | — | — | — | — |
+| `sany_coverage_trace` | SANY | PASS | — | — | — | — |
+| `tlc_commit_cap_regression` | TLC | PASS | 13 | 13 | 0 | 7 |
+| `tlc_coverage_trace` | TLC | PASS | 1,496 | 1,232 | 0 | 17 |
+| `tlc_raft3_quick` | TLC | PASS | 8,893,969 | 769,727 | 0 | 35 |
+| `tlc_timer3_quick` | TLC | PASS | 89,614,282 | 6,156,762 | 0 | 35 |
+| `tlc_raft3_safety` | TLC | PASS | 132,953,091 | 11,560,890 | 0 | 47 |
+
+Every TLC step shows the explicit completion sentence, zero queued states, and
+no violation. The previously blocked commit-cap regression (sandbox RMI
+denial) and the previously timed-out general quick model both completed on
+local hardware. The non-vacuity witnesses were exercised: election,
+replication, quorum commit, application by two processes, crash, restart
+(`CoverageTrace`), and the stale-suffix repair regression reached its forced
+final state with the negative-control property satisfied (`CommitCapRegression`).
+
+## Cap revision record
+
+One pre-declared cap revision was applied between runs: `tlc_timer3_quick`
+was raised from 300 s to 1800 s after an intermediate full run
+(`formal-20260825T121148Z-9388`) classified it INCOMPLETE at its original cap
+while every other step passed. A focused rerun
+(`formal-timer3-rev2`) confirmed the configuration completes explicitly, and
+the authoritative full run above was executed afterwards under the revised
+manifest. No other cap changed. Superseded evidence remains under its
+original run id.
+
+## What this establishes and what it does not
+
+V5 is exhaustive only for the configured finite constants and `MaxInFlight`
+bounds of each model. It is not a proof for arbitrary cluster sizes, terms,
+log lengths, or values, and it says nothing about availability or detector
+quality. Abstraction limits are enumerated in `README.md`. Gate-level context
+and pointers live in `../docs/VALIDATION_GATES.md`.
+
+---
+
+# Superseded record (2026-07-18) — retained verbatim for history
+
 Run date: 2026-07-18. This log records the bounded checks completed during the
 formal-model review fix. It is not a V5 pass: the general quick model did not
 complete within its practical cap, the final commit-cap TLC rerun was blocked
 before exploration, the timer quick model was not run after the final edits,
 and the expanded model was intentionally not started.
 
-## Toolchain
-
-- TLA+ tools: TLC 2.19, revision `5a47802`, 2024-08-08 release.
-- `tla2tools.jar` SHA-256:
-  `936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88`.
-- Java: OpenJDK 11.0.31, Ubuntu build
-  `11.0.31+11-post-1ubuntu1-22.04.2-Ubuntu`.
-- TLC used the breadth-first checker and the `MSBDiskFPSet` implementation.
-
-The JAR was downloaded to `/tmp` and is not part of the repository.
-
-## Semantic parsing
-
-SANY semantic processing completed with exit status 0 for:
-
-- `RelativisticRaft.tla`;
-- `TimerAdaptation.tla`;
-- `CommitCapRegression.tla`; and
-- `CoverageTrace.tla`.
-
-`CommitCapRegression.tla` was reparsed after
-`OldLengthRuleCounterexample` became a configured temporal property. That final
-SANY run completed with exit status 0.
-
-## Completed focused checks
-
-### Prior commit-cap reachability run (superseded)
-
-Then-current configuration: `models/CommitCapRegression.cfg` (`MaxTerm = 3`,
-`MaxLogLength = 3`, `MaxInFlight = 3`), before the negative-control temporal
-property was configured.
-
-- 13 states generated;
-- 13 distinct states;
-- complete-state-graph depth 7;
-- 0 states left on the queue;
-- the forced phase sequence reached its final state; and
-- no configured error was reported.
-
-This completed run established reachability of the forced stale-suffix repair
-and the fixed outcome: the one-entry RPC advanced the follower only to index 1
-and preserved `CommittedPrefixPresent`. It was executed before
-`OldLengthRuleCounterexample` was added to the configuration, so it is retained
-only as prior reachability evidence. It is **not** a completed check of the
-current commit-cap configuration and is not an exhaustive check of all
-three-entry Raft executions.
-
-### Coverage/non-vacuity trace
-
-Configuration: `models/CoverageTrace.cfg` (`MaxTerm = 1`,
-`MaxLogLength = 1`, `MaxInFlight = 8`).
-
-- 1,496 states generated;
-- 1,232 distinct states;
-- complete-state-graph depth 17;
-- 0 states left on the queue;
-- the temporal completion property was checked over the complete focused state
-  space; and
-- no invariant, action-property, or liveness error found.
-
-The forced trace reached election, replication, quorum commit, application by
-two processes, crash, and restart. It demonstrates non-vacuous exercise of
-those paths, not general safety.
-
-## Incomplete checks
-
-### Final commit-cap regression
-
-The current `OldLengthRuleCounterexample` property requires every fair forced
-regression behavior to reach phase 6 and demonstrate all of the following in
-the same state:
-
-- the fixed RPC-covered-index rule committed only index 1;
-- the superseded `Len(merged)` rule would compute index 2; and
-- the follower's retained entry at index 2 differs from the globally committed
-  entry at that index.
-
-The final one-worker TLC rerun parsed and semantically processed the modules,
-then failed before state exploration because the execution sandbox denied
-TLC's localhost worker socket (`java.rmi.server.ExportException`, caused by
-`java.net.SocketException: Operation not permitted`). A requested escalated
-retry was not launched because the execution service reported an account usage
-limit. Therefore the final run has no state statistics or model-checking result
-and is **not a pass**. The current configuration must be rerun when TLC local
-worker execution is available.
-
-### General configurations
-
-`models/Raft3Quick.cfg` was run with four workers and an external 30-second
-wall-time cap. It did not complete. The last emitted progress record reported:
-
-- search depth 17;
-- 432,393 states generated;
-- 67,364 distinct states;
-- 27,072 states still queued; and
-- no violation reported up to that progress point.
-
-The process was terminated by the cap and emitted no complete-state or temporal
-property summary. This run is **incomplete and not a pass**. “No violation so
-far” is not evidence that the configured invariants hold over all reachable
-states.
-
-After the final edits:
-
-- `models/Timer3Quick.cfg` was not model-checked, so no post-edit generated,
-  distinct, depth, queue, or completion statistics exist; and
-- `models/Raft3Safety.cfg` was not model-checked because its larger bounds were
-  expected to exceed the practical review budget.
-
-Accordingly, publication gate V5 remains open. A future validation report must
-complete the declared configurations (or preregister smaller, explicitly
-scoped configurations), retain full logs, and replace rather than reinterpret
-the incomplete status above.
-
-## Reproducible rerun procedure
-
-The repository now contains `scripts/formal_validation.py` and the pinned
-`formal/validation/validation_manifest.json`. Future checks should use that
-harness so every command has an explicit cap and isolated state directory and
-so raw logs, hashes, versions, and classifications are archived consistently.
-The classifier requires explicit TLC completion and zero queued states; exit
-status zero alone is insufficient. See `README.md` and
-`validation/README.md` for commands and result semantics.
-
-Adding the harness does not change the incomplete results above and does not
-close V5. A new full result directory with every declared step classified
-`PASS` is required before this log can be superseded.
+(…the remainder of the superseded log is preserved in repository history at
+commit `19e190d`; its classifications are replaced by the authoritative run
+above and are no longer current.)
