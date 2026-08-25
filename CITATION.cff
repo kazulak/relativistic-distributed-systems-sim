@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+title: Relativistic Distributed Systems Simulator
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - family-names: Kazulak
+    given-names: Tomasz
+identifiers: []
+version: 0.1.0
+date-released: "2026-08-25"
+license: MIT
+repository-code: "https://github.com/kazulak/relativistic-distributed-systems-sim"
+abstract: >-
+  A Julia discrete-event simulator for distributed-systems protocols,
+  currently Raft consensus, executing on moving worldlines in flat
+  (special-relativistic) Minkowski spacetime. It provides a typed physics
+  kernel with proper-time clocks and causal light-cone message delivery, a
+  protocol-faithful static-membership Raft state machine with runtime
+  invariant auditing and client-history linearizability checking, a
+  deterministic research scenario harness, and fingerprintable adaptation
+  policy tooling.
+keywords:
+  - raft
+  - consensus
+  - special-relativity
+  - spacetime
+  - discrete-event-simulation
+  - distributed-systems
+  - failure-detection
