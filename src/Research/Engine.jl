@@ -61,6 +61,7 @@ mutable struct ResearchRunState
     causal_delivery_ok::Bool
     violations::Vector{String}
     failure_reason::Union{Nothing,String}
+    timing::Union{Nothing,RunTimingState}
 end
 
 @inline function _mix64(value::UInt64)
@@ -145,6 +146,29 @@ function _observe_transition!(
     node = state.cluster.nodes[node_id]
     if node.durable.current_term > before_term && node.volatile.role == Candidate
         state.accumulator.elections_started += 1
+        if !isnothing(state.timing)
+            state.timing.election_fires += 1
+            runtime = get(state.timing.runtimes, node_id, nothing)
+            !isnothing(runtime) && note_election_started!(runtime)
+            if !isnothing(_active_leader(state))
+                state.timing.suspicions += 1
+            elseif !isempty(state.timing.open_crashes)
+                resolved = nothing
+                for (crashed, coordinate) in state.timing.open_crashes
+                    if isnothing(resolved) || coordinate > resolved[2]
+                        resolved = (crashed, coordinate)
+                    end
+                end
+                delay = proper_time_between(
+                    state.config.spacetime,
+                    state.config.worldlines[node_id],
+                    resolved[2],
+                    state.scheduler.now,
+                )
+                push!(state.timing.detection_delays_proper, Float64(delay))
+                filter!(entry -> entry !== resolved, state.timing.open_crashes)
+            end
+        end
     end
     state.accumulator.maximum_term = max(
         state.accumulator.maximum_term,
@@ -186,10 +210,39 @@ end
 
 function _schedule_timer!(state::ResearchRunState, effect::ResetTimer, parent)
     timer_name = effect.kind == ElectionTimer ? :election : :heartbeat
+    deadline_local = effect.deadline_local
+    if !isnothing(state.timing) &&
+           effect.kind === ElectionTimer &&
+           haskey(state.timing.runtimes, effect.node)
+        # Multiplicative timeout scaling: keep the node's own randomized draw,
+        # scale its span toward the policy band's midpoint. This preserves the
+        # de-synchronization that makes elections resolvable while letting the
+        # policy shorten or lengthen timeouts from observed arrivals.
+        runtime = state.timing.runtimes[effect.node]
+        spec = state.timing.spec
+        now_local = local_time(state.clocks[effect.node], state.scheduler.now)
+        armed_span = effect.deadline_local - now_local
+        armed_span > 0.0 || (armed_span = spec.base_timeout)
+        band_lo, band_hi = election_band(runtime, spec)
+        target_midpoint = (band_lo + band_hi) / 2
+        expected_internal =
+            (
+                state.config.raft.election_timeout_min +
+                state.config.raft.election_timeout_max
+            ) / 2
+        scale = clamp(target_midpoint / expected_internal, 0.25, 4.0)
+        new_span = clamp(armed_span * scale, spec.budget.minimum, spec.budget.maximum)
+        deadline_local = now_local + new_span
+        Raft.rearm_election_deadline!(
+            state.cluster.nodes[effect.node],
+            now_local,
+            new_span,
+        )
+    end
     event = schedule_local_timer!(
         state.scheduler,
         state.clocks[effect.node],
-        effect.deadline_local,
+        deadline_local,
         effect.node,
         timer_name,
         effect.generation;
@@ -206,8 +259,24 @@ function _apply_effects!(state::ResearchRunState, effects, parent)
         elseif effect isa SendMessage
             state.next_message_id == typemax(UInt64) &&
                 throw(OverflowError("research message id exhausted"))
-            state.next_message_id += 1
             wire_bytes = _wire_bytes(effect.message, state.config.network)
+            if !isnothing(state.timing) &&
+                   state.timing.spec.level >= 1 &&
+                   effect.message isa AppendEntriesRequest
+                leader = _active_leader(state)
+                if !isnothing(leader) && leader.id == effect.from &&
+                       leader.durable.current_term == UInt64(effect.message.term)
+                    state.timing.heartbeat_sequences[effect.from] += UInt64(1)
+                    sequence = state.timing.heartbeat_sequences[effect.from]
+                    tau_emit = local_time(state.clocks[effect.from], state.scheduler.now)
+                    state.timing.heartbeat_meta[state.next_message_id + UInt64(1)] =
+                        (sequence, tau_emit)
+                    surcharge = metadata_byte_surcharge(state.timing.spec.level)
+                    wire_bytes += surcharge
+                    state.timing.metadata_bytes_sent += surcharge
+                end
+            end
+            state.next_message_id += 1
             envelope = MessageEnvelope(
                 state.next_message_id,
                 effect.from,
@@ -357,12 +426,31 @@ function _deliver!(state::ResearchRunState, event::ScheduledEvent, delivery::Mes
             metadata.direct_null_residual,
         ),
     )
+    _observe_heartbeat_delivery!(state, envelope, event)
     _apply_transition!(
         state,
         envelope.to,
         MessageInput(envelope.from, envelope.payload),
         event.event_id,
     )
+    return nothing
+end
+
+function _observe_heartbeat_delivery!(state::ResearchRunState, envelope::MessageEnvelope, event::ScheduledEvent)
+    isnothing(state.timing) && return nothing
+    envelope.payload isa AppendEntriesRequest || return nothing
+    meta = get(state.timing.heartbeat_meta, envelope.message_id, nothing)
+    runtime = get(state.timing.runtimes, envelope.to, nothing)
+    isnothing(runtime) && return nothing
+    tau_arrive = local_time(state.clocks[envelope.to], event.time)
+    observe_arrival!(
+        runtime,
+        state.timing.spec,
+        isnothing(meta) ? nothing : meta[1],
+        isnothing(meta) ? nothing : meta[2],
+        tau_arrive,
+    )
+    note_leader_traffic!(runtime)
     return nothing
 end
 
@@ -494,6 +582,10 @@ function _dispatch!(state::ResearchRunState, event::ScheduledEvent)
     elseif payload isa MessageDelivery
         _deliver!(state, event, payload)
     elseif payload isa CrashNode
+        if !isnothing(state.timing)
+            push!(state.timing.open_crashes, (payload.node, event.time))
+            state.timing.spec.reset_on_crash && reset_runtime!(state.timing, payload.node)
+        end
         _apply_transition!(state, payload.node, CrashInput(), event.event_id)
     elseif payload isa RecoverNode
         _apply_transition!(state, payload.node, RecoverInput(), event.event_id)
@@ -514,7 +606,7 @@ function _dispatch!(state::ResearchRunState, event::ScheduledEvent)
     return nothing
 end
 
-function _initialize_state(config::ScenarioConfig, seed::UInt64)
+function _initialize_state(config::ScenarioConfig, seed::UInt64, timing::Union{Nothing,TimingSpec})
     scheduler = Scheduler(start_time=config.window.start_coordinate)
     clocks = Dict{Int,AbstractLocalClock}()
     rngs = Dict{Int,MersenneTwister}()
@@ -556,6 +648,7 @@ function _initialize_state(config::ScenarioConfig, seed::UInt64)
         true,
         String[],
         nothing,
+        isnothing(timing) ? nothing : RunTimingState(timing, collect(config.raft.members)),
     )
     for node_id in config.raft.members
         _apply_effects!(state, initial_effects[node_id], nothing)
@@ -656,12 +749,17 @@ All stochastic choices are functions of the explicit `seed`; Raft owns one
 private RNG stream per node, and transport decisions are stateless functions of
 the seed and message identity. No global RNG or wall clock is read.
 """
-function run_scenario(config::ScenarioConfig; seed::Integer=1, max_events::Integer=1_000_000)
+function run_scenario(
+    config::ScenarioConfig;
+    seed::Integer=1,
+    max_events::Integer=1_000_000,
+    timing::Union{Nothing,TimingSpec}=nothing,
+)
     validate_config(config)
     seed >= 0 || throw(ArgumentError("research seed must be non-negative"))
     max_events > 0 || throw(ArgumentError("max_events must be positive"))
     seed_value = UInt64(seed)
-    state = _initialize_state(config, seed_value)
+    state = _initialize_state(config, seed_value, timing)
     processed = 0
     while !isempty(state.scheduler) &&
           peek_next(state.scheduler).time <= config.window.censor_coordinate &&
@@ -712,6 +810,23 @@ function run_scenario(config::ScenarioConfig; seed::Integer=1, max_events::Integ
     safety_ok = safety.raft_invariants && safety.client_history &&
                 safety.causal_deliveries && safety.causal_trace
     status = !isnothing(state.failure_reason) ? :failed : safety_ok ? :completed : :invalid
+    adaptation = if isnothing(state.timing)
+        nothing
+    else
+        timing_state = state.timing
+        elections = max(timing_state.election_fires, 1)
+        AdaptationDiagnostics(
+            timing_state.spec.arm,
+            timing_state.spec.level,
+            timing_fingerprint(timing_state.spec),
+            timing_state.suspicions,
+            timing_state.election_fires,
+            timing_state.suspicions / elections,
+            copy(timing_state.detection_delays_proper),
+            length(timing_state.open_crashes),
+            timing_state.metadata_bytes_sent,
+        )
+    end
     return RunResult(
         config.name,
         config.family,
@@ -724,6 +839,7 @@ function run_scenario(config::ScenarioConfig; seed::Integer=1, max_events::Integ
         _final_metrics(state, operations),
         operations,
         state.trace,
+        adaptation,
     )
 end
 

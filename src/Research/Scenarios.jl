@@ -93,7 +93,7 @@ function canonical_scenario(
         throw(ArgumentError("heartbeat interval must be finite and positive"))
     isfinite(rho_value) && rho_value >= 0.0 ||
         throw(ArgumentError("rho must be finite and non-negative"))
-    isfinite(beta_value) && 0.0 <= beta_value < 1.0 ||
+    isfinite(beta_value) && -1.0 < beta_value < 1.0 ||
         throw(ArgumentError("beta must be finite and subluminal"))
     isfinite(acceleration_scale) && acceleration_scale >= 0.0 ||
         throw(ArgumentError("a_star must be finite and non-negative"))
@@ -169,7 +169,7 @@ function validate_config(config::ScenarioConfig)
         throw(ArgumentError("workload client node is outside Raft membership"))
     isfinite(config.characteristic_distance) && config.characteristic_distance >= 0.0 ||
         throw(ArgumentError("characteristic distance must be finite and non-negative"))
-    isfinite(config.beta_scale) && 0.0 <= config.beta_scale < 1.0 ||
+    isfinite(config.beta_scale) && -1.0 < config.beta_scale < 1.0 ||
         throw(ArgumentError("scenario beta scale must be finite and subluminal"))
     isfinite(config.proper_acceleration_scale) && config.proper_acceleration_scale >= 0.0 ||
         throw(ArgumentError("proper acceleration scale must be finite and non-negative"))
@@ -358,4 +358,116 @@ function rq1_scenarios(; cluster_size::Integer=3)
         canonical_scenario(AcceleratingBaseline; cluster_size=cluster_size),
         canonical_scenario(PartitionDropStress; cluster_size=cluster_size),
     ]
+end
+
+"""
+Build a non-stationary E3 scenario: inertial coast at signed `beta_initial`
+followed by constant proper acceleration onset at `onset_coordinate` for
+every member. Trajectories are closed-form in rapidity space and audited.
+"""
+function trajectory_change_scenario(;
+    cluster_size::Integer=5,
+    name::Union{Nothing,Symbol}=nothing,
+    signal_speed::Real=1.0,
+    heartbeat_interval::Real=0.2,
+    rho::Real=0.20,
+    beta_initial::Real=0.25,
+    a_star::Real=0.05,
+    onset_coordinate::Real=3.0,
+    window::ExperimentWindow=ExperimentWindow(),
+    workload::Union{Nothing,WorkloadSpec}=nothing,
+    network::Union{Nothing,NetworkProfile}=nothing,
+    faults::Union{Nothing,AbstractVector{FaultSpec}}=nothing,
+)
+    n = Int(cluster_size)
+    n in (3, 5, 7) || throw(ArgumentError("research clusters must contain 3, 5, or 7 nodes"))
+    c = Float64(signal_speed)
+    heartbeat = Float64(heartbeat_interval)
+    beta = Float64(beta_initial)
+    onset = Float64(onset_coordinate)
+    -1.0 < beta < 1.0 || throw(ArgumentError("beta_initial must be subluminal"))
+    a_star >= 0.0 || throw(ArgumentError("a_star must be non-negative"))
+    onset > window.start_coordinate ||
+        throw(ArgumentError("onset must lie inside the run window"))
+    alpha = Float64(a_star) * c / heartbeat
+
+    spacetime = MinkowskiSpacetime(c)
+    spacing = Float64(rho) * c * heartbeat
+    midpoint = (n + 1) / 2
+    phi_s = atanh(beta)
+    gamma_s = cosh(phi_s)
+
+    function make_worldline(node::Int)
+        centered = node - midpoint
+        x0 = centered * spacing
+        v_s = beta * c
+        x_onset = x0 + v_s * onset
+        sh_s = sinh(phi_s)
+        ch_s = cosh(phi_s)
+        position(t) =
+            (alpha == 0 || t <= onset) ? SVector{3,Float64}(x0 + v_s * t, 0.0, 0.0) :
+            begin
+                phi = asinh(sh_s + alpha * (t - onset) / c)
+                SVector{3,Float64}(
+                    x_onset + (c^2 / alpha) * (cosh(phi) - ch_s),
+                    0.0,
+                    0.0,
+                )
+            end
+        velocity(t) =
+            (alpha == 0 || t <= onset) ? SVector{3,Float64}(v_s, 0.0, 0.0) :
+            SVector{3,Float64}(c * tanh(asinh(sh_s + alpha * (t - onset) / c)), 0.0, 0.0)
+        # The worldline is C^1 but not C^2 at the onset kink; finite-difference
+        # auditing therefore samples strictly inside the smooth segments.
+        # Continuity of position and velocity at the onset is exact by
+        # construction and asserted in the test suite.
+        audit_points = sort(union(
+            collect(range(window.start_coordinate + 1.0e-6; stop=onset - 1.0e-4, length=4)),
+            collect(range(onset + 1.0e-4; stop=window.censor_coordinate, length=6)),
+        ))
+        return ParametricWorldline(
+            spacetime,
+            position,
+            velocity;
+            consistency=:audited,
+            tmin=-Inf,
+            tmax=Inf,
+            validate_at=window.start_coordinate,
+            audit_times=collect(audit_points),
+        )
+    end
+
+    worldlines = AbstractWorldline{Float64}[make_worldline(node) for node in 1:n]
+    timeout_min = heartbeat * 5.0
+    timeout_max = heartbeat * 7.0
+    raft = RaftConfig(
+        collect(1:n);
+        election_timeout=(timeout_min, timeout_max),
+        heartbeat_interval=heartbeat,
+    )
+    selected_network = something(
+        network,
+        NetworkProfile(
+            processing_delay=0.001,
+            delay_jitter=0.001,
+            bandwidth_bytes_per_time=100_000.0,
+        ),
+    )
+    selected_workload = something(workload, WorkloadSpec(client_node=1))
+    config = ScenarioConfig(
+        something(name, :trajectory_change),
+        AcceleratingBaseline,
+        spacetime,
+        worldlines,
+        raft,
+        selected_network,
+        isnothing(faults) ? FaultSpec[] : collect(faults),
+        selected_workload,
+        window,
+        spacing,
+        beta,
+        alpha * heartbeat / c,
+    )
+    validate_config(config)
+    return config
 end

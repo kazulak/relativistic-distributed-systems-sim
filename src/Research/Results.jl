@@ -7,6 +7,19 @@ struct SafetyOracleFlags
     violations::Vector{String}
 end
 
+"""E3 adaptation telemetry; `nothing` when no timing arm is active."""
+struct AdaptationDiagnostics
+    arm::Symbol
+    information_level::Int
+    timing_fingerprint::String
+    suspicions::Int
+    election_fires::Int
+    false_suspicion_rate::Float64
+    detection_delays_proper::Vector{Float64}
+    censored_detections::Int
+    metadata_bytes_sent::Int
+end
+
 """Per-operation observation; pending requests are explicitly right-censored."""
 struct OperationMetric
     request_id::RequestID
@@ -73,6 +86,7 @@ struct RunResult
     metrics::RunMetrics
     operations::Vector{OperationMetric}
     trace::EventTrace
+    adaptation::Union{Nothing,AdaptationDiagnostics}
 end
 
 """One standard-Raft scenario result relative to the co-located control."""

@@ -223,6 +223,26 @@ function initialize!(node::RaftNode, local_now::Real, rng::AbstractRNG)
     return effects
 end
 
+"""
+Re-arm only the election-deadline bookkeeping to `local_now + timeout`.
+
+This changes WHEN the existing election timer may next fire; it adds no
+transition, consumes no RNG draws, and touches no voting/log/quorum state,
+so every safety-relevant transition remains exactly as specified. Runners
+use it to apply external timing-policy bands at the scheduler boundary.
+"""
+function rearm_election_deadline!(node::RaftNode, local_now::Real, timeout::Real)
+    now = Float64(local_now)
+    span = Float64(timeout)
+    isfinite(now) || throw(ArgumentError("local time must be finite"))
+    isfinite(span) && span > 0.0 ||
+        throw(ArgumentError("election timeout must be finite and positive"))
+    now >= node.last_local_time - 8eps(max(abs(now), 1.0)) ||
+        throw(ArgumentError("node-local time moved backwards"))
+    node.volatile.election_deadline = now + span
+    return node
+end
+
 function _execute_command!(machine::Dict{String,String}, command::PutCommand)
     previous = get(machine, command.key, nothing)
     machine[command.key] = command.value

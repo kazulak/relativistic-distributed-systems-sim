@@ -8,6 +8,7 @@ adaptation.
 module Research
 
 using Random
+using StaticArrays
 using ..SimulationCore
 using ..Raft
 using ..RelativisticDistributedSystemsSim: MinkowskiSpacetime,
@@ -15,6 +16,7 @@ using ..RelativisticDistributedSystemsSim: MinkowskiSpacetime,
     AbstractWorldline,
     InertialWorldline,
     UniformlyAcceleratedWorldline,
+    ParametricWorldline,
     proper_time_between,
     coordinate_time_after_proper_time,
     worldline_event,
@@ -24,6 +26,8 @@ using ..RelativisticDistributedSystemsSim: MinkowskiSpacetime,
 
 include("Clocks.jl")
 include("Configurations.jl")
+include("Detectors.jl")
+include("TimingBands.jl")
 include("Results.jl")
 include("Scenarios.jl")
 include("Engine.jl")
@@ -42,15 +46,28 @@ export ProperTimeClock,
     ScenarioConfig,
     DimensionlessParameters,
     canonical_scenario,
+    trajectory_change_scenario,
     rq1_scenarios,
     validate_config,
     dimensionless_parameters,
     config_fingerprint,
+    TimingBudget,
+    TimingSpec,
+    TIMING_ARMS,
+    timing_fingerprint,
+    election_band,
+    draw_election_offset!,
+    observe_arrival!,
+    note_leader_traffic!,
+    note_election_started!,
+    reset_runtime!,
+    metadata_byte_surcharge,
     SafetyOracleFlags,
     OperationMetric,
     CausalDelayMetric,
     RunMetrics,
     RunResult,
+    AdaptationDiagnostics,
     BaselineComparison,
     run_scenario,
     compare_standard_baselines,
