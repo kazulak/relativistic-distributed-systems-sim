@@ -44,13 +44,14 @@ end
 function _linearization_search(
     operations::Dict{RequestID,HistoryOperation},
     remaining::Set{RequestID},
+    pending::Set{RequestID},
     executed::Set{RequestID},
     machine::Dict{String,String},
 )
     isempty(remaining) && return true
     for request_id in sort!(collect(remaining))
         operation = operations[request_id]
-        required = Set(filter(predecessor -> haskey(operations, predecessor) && operations[predecessor].completed,
+        required = Set(filter(predecessor -> haskey(operations, predecessor) && (operations[predecessor].completed || predecessor in executed),
                               operation.predecessors))
         issubset(required, executed) || continue
         next_machine = copy(machine)
@@ -60,8 +61,24 @@ function _linearization_search(
         delete!(next_remaining, request_id)
         next_executed = copy(executed)
         push!(next_executed, request_id)
-        _linearization_search(operations, next_remaining, next_executed, next_machine) && return true
+        _linearization_search(operations, next_remaining, pending, next_executed, next_machine) && return true
     end
+
+    for request_id in sort!(collect(pending))
+        operation = operations[request_id]
+        operation.request.command isa PutCommand || continue
+        required = Set(filter(predecessor -> haskey(operations, predecessor) && (operations[predecessor].completed || predecessor in executed),
+                              operation.predecessors))
+        issubset(required, executed) || continue
+        next_machine = copy(machine)
+        _history_result!(next_machine, operation.request.command)
+        next_pending = copy(pending)
+        delete!(next_pending, request_id)
+        next_executed = copy(executed)
+        push!(next_executed, request_id)
+        _linearization_search(operations, remaining, next_pending, next_executed, next_machine) && return true
+    end
+
     return false
 end
 
@@ -70,11 +87,14 @@ Independent bounded checker for completed key/value operations.
 
 The caller supplies causal/real-time predecessors at invocation recording time;
 there is deliberately no comparison of unrelated nodes' coordinate timestamps.
-Pending operations are omitted, as permitted by linearizability completion.
+Pending operations may either take effect or be omitted, per linearizability completion.
 """
 function is_linearizable(history::ClientHistory; max_completed::Integer=12)
     completed_ids = Set(
         request_id for (request_id, operation) in history.operations if operation.completed
+    )
+    pending_ids = Set(
+        request_id for (request_id, operation) in history.operations if !operation.completed
     )
     length(completed_ids) <= max_completed ||
         throw(ArgumentError("history exceeds bounded checker limit of $max_completed operations"))
@@ -87,6 +107,7 @@ function is_linearizable(history::ClientHistory; max_completed::Integer=12)
     return _linearization_search(
         history.operations,
         completed_ids,
+        pending_ids,
         Set{RequestID}(),
         Dict{String,String}(),
     )

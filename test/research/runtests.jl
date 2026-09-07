@@ -143,5 +143,6 @@ end
 
 include("metamorphic.jl")
 include("adaptation_boundary.jl")
+include("causal_bounds.jl")
 
 end

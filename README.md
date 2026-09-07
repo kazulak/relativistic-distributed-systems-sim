@@ -56,6 +56,10 @@ relativistic-distributed-systems-sim/
     adaptations/
   experiments/
     run_rq1.jl
+    analyze_rq1.jl
+    run_e3.jl
+    analyze_e3.jl
+    power_analysis_e3.jl
     configs/rq1/
   formal/                # TLA+ models and validation harness inputs
   scripts/               # formal-validation harness entry points

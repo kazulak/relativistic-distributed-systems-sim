@@ -337,15 +337,23 @@ function _transmit!(state::ResearchRunState, event::ScheduledEvent, send::Resear
     physical_emission = queue_start + serialization
     isfinite(physical_emission) || throw(OverflowError("physical emission time overflowed"))
     state.link_free_at[link] = physical_emission
-    intersection = light_cone_intersection(
-        state.config.spacetime,
-        worldline_event(state.config.worldlines[envelope.from], physical_emission),
-        state.config.worldlines[envelope.to];
-        max_coordinate_time=max(
-            state.config.window.censor_coordinate + 100state.config.raft.election_timeout_max,
-            physical_emission + 100state.config.raft.election_timeout_max,
-        ),
-    )
+    intersection = try
+        light_cone_intersection(
+            state.config.spacetime,
+            worldline_event(state.config.worldlines[envelope.from], physical_emission),
+            state.config.worldlines[envelope.to];
+            max_coordinate_time=max(
+                state.config.window.censor_coordinate + 100state.config.raft.election_timeout_max,
+                physical_emission + 100state.config.raft.election_timeout_max,
+            ),
+        )
+    catch error
+        if error isa NoFutureLightConeIntersection || error isa LightConeSearchExhausted
+            state.accumulator.transport_drops += 1
+            return nothing
+        end
+        rethrow(error)
+    end
     jitter = profile.delay_jitter *
              _uniform01(state.seed, envelope.message_id, UInt64(0x20))
     direct_reception = Float64(intersection.reception.t)

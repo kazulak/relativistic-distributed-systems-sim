@@ -210,35 +210,62 @@ function validate_config(config::ScenarioConfig)
     return true
 end
 
+function _try_light_cone_intersection(
+    spacetime::MinkowskiSpacetime{Float64},
+    emission::SpacetimeEvent{Float64},
+    receiver::AbstractWorldline{Float64},
+    max_t::Float64,
+)
+    try
+        res = light_cone_intersection(spacetime, emission, receiver; max_coordinate_time=max_t)
+        return Float64(res.reception.t)
+    catch e
+        if e isa NoFutureLightConeIntersection || e isa LightConeSearchExhausted
+            return Inf
+        end
+        rethrow(e)
+    end
+end
+
 function _quorum_roundtrip(config::ScenarioConfig, source::Int, emission_time::Float64)
     source_worldline = config.worldlines[source]
     outbound_event = worldline_event(source_worldline, emission_time)
     roundtrips = Float64[]
+    max_t = config.window.censor_coordinate + 100config.raft.election_timeout_max
     for peer in config.raft.members
         peer == source && continue
-        outbound = light_cone_intersection(
+        t_out = _try_light_cone_intersection(
             config.spacetime,
             outbound_event,
-            config.worldlines[peer];
-            max_coordinate_time=config.window.censor_coordinate + 100config.raft.election_timeout_max,
+            config.worldlines[peer],
+            max_t,
         )
-        inbound = light_cone_intersection(
-            config.spacetime,
-            outbound.reception,
-            source_worldline;
-            max_coordinate_time=config.window.censor_coordinate + 100config.raft.election_timeout_max,
-        )
-        push!(
-            roundtrips,
-            Float64(
-                proper_time_between(
-                    config.spacetime,
-                    source_worldline,
-                    emission_time,
-                    inbound.reception.t,
-                ),
-            ),
-        )
+        if isfinite(t_out)
+            out_event = worldline_event(config.worldlines[peer], t_out)
+            t_in = _try_light_cone_intersection(
+                config.spacetime,
+                out_event,
+                source_worldline,
+                max_t,
+            )
+            if isfinite(t_in)
+                push!(
+                    roundtrips,
+                    Float64(
+                        proper_time_between(
+                            config.spacetime,
+                            source_worldline,
+                            emission_time,
+                            t_in,
+                        ),
+                    ),
+                )
+            else
+                push!(roundtrips, Inf)
+            end
+        else
+            push!(roundtrips, Inf)
+        end
     end
     sort!(roundtrips)
     return roundtrips[quorum_size(config.raft) - 1]
@@ -255,23 +282,27 @@ function _source_receiver_rate_ratio(config::ScenarioConfig, source::Int, receiv
         source_clock,
         source_local + config.raft.heartbeat_interval,
     )
-    first = light_cone_intersection(
+    max_t = config.window.censor_coordinate + 100config.raft.election_timeout_max
+    t_first = _try_light_cone_intersection(
         config.spacetime,
         worldline_event(config.worldlines[source], start),
-        config.worldlines[receiver];
-        max_coordinate_time=config.window.censor_coordinate + 100config.raft.election_timeout_max,
+        config.worldlines[receiver],
+        max_t,
     )
-    second = light_cone_intersection(
+    t_second = _try_light_cone_intersection(
         config.spacetime,
         worldline_event(config.worldlines[source], second_emission_time),
-        config.worldlines[receiver];
-        max_coordinate_time=config.window.censor_coordinate + 100config.raft.election_timeout_max,
+        config.worldlines[receiver],
+        max_t,
     )
+    if !isfinite(t_first) || !isfinite(t_second)
+        return Inf
+    end
     receiver_elapsed = proper_time_between(
         config.spacetime,
         config.worldlines[receiver],
-        first.reception.t,
-        second.reception.t,
+        t_first,
+        t_second,
     )
     return Float64(receiver_elapsed) / config.raft.heartbeat_interval
 end
@@ -471,3 +502,95 @@ function trajectory_change_scenario(;
     validate_config(config)
     return config
 end
+
+
+"""
+    causal_quorum_bound(config::ScenarioConfig, client_node::Int, client_invoke_coord_time::Float64; leader_node::Union{Nothing, Int}=nothing)
+
+Compute the physical causal lower bound (Proposition 1, Claim C3) on proper time elapsed along the client's worldline
+for a strict-quorum write operation invoked at `client_invoke_coord_time`.
+If `leader_node` is specified, evaluates for that leader; if `nothing`, evaluates the minimum over all cluster members.
+"""
+function causal_quorum_bound(
+    config::ScenarioConfig,
+    client_node::Int,
+    client_invoke_coord_time::Float64;
+    leader_node::Union{Nothing, Int}=nothing,
+)
+    validate_config(config)
+    client_worldline = config.worldlines[client_node]
+    candidates = isnothing(leader_node) ? config.raft.members : [leader_node]
+    max_t = max(
+        config.window.censor_coordinate + 100 * config.raft.election_timeout_max,
+        client_invoke_coord_time + 100 * config.raft.election_timeout_max,
+    )
+
+    bounds = Float64[]
+    for leader in candidates
+        leader_worldline = config.worldlines[leader]
+        t_start = client_invoke_coord_time
+
+        # Leader replication to peers and return
+        e_leader = worldline_event(leader_worldline, t_start)
+        ack_times = Float64[t_start] # leader's own write
+        for peer in config.raft.members
+            peer == leader && continue
+            t_out = _try_light_cone_intersection(config.spacetime, e_leader, config.worldlines[peer], max_t)
+            if isfinite(t_out)
+                out_event = worldline_event(config.worldlines[peer], t_out)
+                t_in = _try_light_cone_intersection(config.spacetime, out_event, leader_worldline, max_t)
+                push!(ack_times, t_in)
+            else
+                push!(ack_times, Inf)
+            end
+        end
+        sort!(ack_times)
+        q = quorum_size(config.raft)
+        t_commit = ack_times[q]
+        !isfinite(t_commit) && continue
+
+        # Proper time on client worldline from invocation to commit
+        dt_proper = Float64(proper_time_between(
+            config.spacetime,
+            client_worldline,
+            t_start,
+            t_commit,
+        ))
+        push!(bounds, dt_proper)
+    end
+    return isempty(bounds) ? Inf : minimum(bounds)
+end
+
+"""
+    verify_causal_quorum_bounds(config::ScenarioConfig, operations::Vector{OperationMetric}; tolerance::Float64=4096eps(Float64))
+
+Audit committed write operations against the causal quorum completion bound (Claim C3).
+Returns `(ok::Bool, min_margin::Float64, violations::Vector{String})`.
+"""
+function verify_causal_quorum_bounds(
+    config::ScenarioConfig,
+    operations::Vector{OperationMetric};
+    tolerance::Float64=4096eps(Float64),
+)
+    violations = String[]
+    min_margin = Inf
+    for op in operations
+        (op.outcome == :committed && op.operation_kind != :read && !isnothing(op.latency_proper)) || continue
+        bound = causal_quorum_bound(config, config.workload.client_node, op.invoked_coordinate)
+        if !isfinite(bound)
+            push!(violations, "operation $(op.request_id) committed at latency $(op.latency_proper) but causal bound is infinite")
+            continue
+        end
+        margin = op.latency_proper - bound
+        min_margin = min(min_margin, margin)
+        if margin < -tolerance
+            push!(
+                violations,
+                "operation $(op.request_id) committed at proper latency $(op.latency_proper) below causal quorum bound $bound (margin: $margin)",
+            )
+        end
+    end
+    return (isempty(violations), isinf(min_margin) ? 0.0 : min_margin, violations)
+end
+
+

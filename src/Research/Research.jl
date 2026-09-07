@@ -22,7 +22,9 @@ using ..RelativisticDistributedSystemsSim: MinkowskiSpacetime,
     worldline_event,
     coordinate_velocity,
     light_cone_intersection,
-    is_future_causal
+    is_future_causal,
+    NoFutureLightConeIntersection,
+    LightConeSearchExhausted
 
 include("Clocks.jl")
 include("Configurations.jl")
@@ -72,6 +74,8 @@ export ProperTimeClock,
     run_scenario,
     compare_standard_baselines,
     trace_records,
-    print_run_summary
+    print_run_summary,
+    causal_quorum_bound,
+    verify_causal_quorum_bounds
 
 end

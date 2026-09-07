@@ -17,7 +17,9 @@ for that execution. It is regression evidence, not a proof of Raft safety.
 Failure to commit before a client deadline is recorded as timed-progress
 censoring, not as a safety violation.
 
-## Running the small RQ1 artifact
+## Running the RQ1 experiments
+
+### Single-scenario runs
 
 The runner imports only the installed package API:
 
@@ -37,6 +39,34 @@ explicit non-negative seed. Families are:
 | `accelerating` | `AcceleratingBaseline` | Non-stationary proper-time/propagation relation. |
 | `stress` | `PartitionDropStress` | Static geometry plus loss, duplication, reordering, link isolation, crash, and recovery. |
 
+### Systematic grid sweeps (Stage E1 & E2)
+
+To address Audit Findings 3 and 7, the runner supports structured Stage E1 (deterministic parameter sweeps across dimensionless $\rho, \theta, \chi, D_{sr}$, run once per cell) and Stage E2 (stochastic disruption sweeps across paired seeds):
+
+```sh
+# Fast smoke verification sweeps
+julia --project=. experiments/run_rq1.jl --sweep e1-smoke --output-dir results/rq1/smoke_e1
+julia --project=. experiments/run_rq1.jl --sweep e2-smoke --output-dir results/rq1/smoke_e2
+
+# Full confirmatory sweeps
+julia --project=. experiments/run_rq1.jl --sweep e1-full --output-dir results/rq1/full_e1
+julia --project=. experiments/run_rq1.jl --sweep e2-full --output-dir results/rq1/full_e2
+```
+
+Outputs written to the target directory:
+- `manifest.json`: schema `rq1-manifest-v1`, git commit hash, Julia version, timestamp, configuration fingerprints, planned run count.
+- `runs.tsv`: tab-separated run observations with full safety flags, physical causal quorum margin checks, and client proper-time deadline availability.
+
+### Analyzing RQ1 results
+
+Analyze run results and generate a markdown evaluation report:
+
+```sh
+julia --project=. experiments/analyze_rq1.jl results/rq1/smoke_e1/runs.tsv
+```
+
+This verifies 100% safety invariant preservation (H1a), checks that no write commits below the physical causal quorum bound (Claim C3, [docs/CAUSAL_QUORUM_BOUND.md](CAUSAL_QUORUM_BOUND.md)), and tabulates deadline availability degradation over $\chi$ and $D_{sr}$ (H1b).
+
 For programmatic experiments:
 
 ```julia
@@ -50,6 +80,7 @@ config = canonical_scenario(
     theta=(5.0, 7.0),
 )
 result = run_scenario(config; seed=7)
+bound_ok, min_margin, violations = verify_causal_quorum_bounds(config, result.operations)
 ```
 
 `rq1_scenarios` constructs the complete family set, while
