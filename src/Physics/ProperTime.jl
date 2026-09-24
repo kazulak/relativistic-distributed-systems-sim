@@ -65,36 +65,51 @@ struct _QuadraturePanel{T<:AbstractFloat}
     error::T
 end
 
-function _quadrature_constant(::Type{T}, text::AbstractString) where {T<:AbstractFloat}
-    return parse(T, text)
+const _GK_NODES_TEXT = (
+    "0.991455371120812639206854697526329",
+    "0.949107912342758524526189684047851",
+    "0.864864423359769072789712788640926",
+    "0.741531185599394439863864773280788",
+    "0.586087235467691130294144838258730",
+    "0.405845151377397166906606412076961",
+    "0.207784955007898467600689403773245",
+)
+const _GK_KRONROD_WEIGHTS_TEXT = (
+    "0.022935322010529224963732008058970",
+    "0.063092092629978553290700663189204",
+    "0.104790010322250183839876322541518",
+    "0.140653259715525918745189590510238",
+    "0.169004726639267902826583426598550",
+    "0.190350578064785409913256402421014",
+    "0.204432940075298892414161999234649",
+    "0.209482141084727828012999174891714",
+)
+const _GK_GAUSS_WEIGHTS_TEXT = (
+    "0.129484966168869693270611432679082",
+    "0.279705391489276667901467771423780",
+    "0.381830050505118944950369775488975",
+    "0.417959183673469387755102040816327",
+)
+
+# The decimal tables are parsed at the precision of `T` so high-precision
+# oracle types (BigFloat, DoubleFloats) get correctly rounded constants.
+# BigFloat precision is a runtime setting, so only fixed-precision IEEE types
+# use tables precomputed at load time; re-parsing on every panel dominated
+# runtime on quadrature worldlines.
+function _gauss_kronrod_tables(::Type{T}) where {T<:AbstractFloat}
+    return (
+        map(text -> parse(T, text), _GK_NODES_TEXT),
+        map(text -> parse(T, text), _GK_KRONROD_WEIGHTS_TEXT),
+        map(text -> parse(T, text), _GK_GAUSS_WEIGHTS_TEXT),
+    )
 end
+const _GK_TABLES_FLOAT64 = _gauss_kronrod_tables(Float64)
+const _GK_TABLES_FLOAT32 = _gauss_kronrod_tables(Float32)
+_gauss_kronrod_tables(::Type{Float64}) = _GK_TABLES_FLOAT64
+_gauss_kronrod_tables(::Type{Float32}) = _GK_TABLES_FLOAT32
 
 function _gauss_kronrod_panel(integrand, left::T, right::T) where {T<:AbstractFloat}
-    nodes = (
-        "0.991455371120812639206854697526329",
-        "0.949107912342758524526189684047851",
-        "0.864864423359769072789712788640926",
-        "0.741531185599394439863864773280788",
-        "0.586087235467691130294144838258730",
-        "0.405845151377397166906606412076961",
-        "0.207784955007898467600689403773245",
-    )
-    kronrod_weights = (
-        "0.022935322010529224963732008058970",
-        "0.063092092629978553290700663189204",
-        "0.104790010322250183839876322541518",
-        "0.140653259715525918745189590510238",
-        "0.169004726639267902826583426598550",
-        "0.190350578064785409913256402421014",
-        "0.204432940075298892414161999234649",
-        "0.209482141084727828012999174891714",
-    )
-    gauss_weights = (
-        "0.129484966168869693270611432679082",
-        "0.279705391489276667901467771423780",
-        "0.381830050505118944950369775488975",
-        "0.417959183673469387755102040816327",
-    )
+    nodes, kronrod_weights, gauss_weights = _gauss_kronrod_tables(T)
 
     midpoint = left + (right - left) / T(2)
     half_width = (right - left) / T(2)
@@ -103,30 +118,30 @@ function _gauss_kronrod_panel(integrand, left::T, right::T) where {T<:AbstractFl
     end
     center_value = T(integrand(midpoint))
     isfinite(center_value) || throw(InvalidWorldlineError("proper-time integrand is not finite"))
-    center_weight = _quadrature_constant(T, kronrod_weights[8])
+    center_weight = kronrod_weights[8]
     kronrod_sum = center_weight * center_value
-    gauss_sum = _quadrature_constant(T, gauss_weights[4]) * center_value
+    gauss_sum = gauss_weights[4] * center_value
     absolute_sum = center_weight * abs(center_value)
     sampled_pairs = Vector{Tuple{T,T,T}}(undef, 7)
 
     for index in 1:7
-        node = _quadrature_constant(T, nodes[index])
+        node = nodes[index]
         offset = half_width * node
         left_value = T(integrand(midpoint - offset))
         right_value = T(integrand(midpoint + offset))
         isfinite(left_value) && isfinite(right_value) ||
             throw(InvalidWorldlineError("proper-time integrand is not finite"))
         pair_sum = left_value + right_value
-        weight = _quadrature_constant(T, kronrod_weights[index])
+        weight = kronrod_weights[index]
         kronrod_sum += weight * pair_sum
         absolute_sum += weight * (abs(left_value) + abs(right_value))
         sampled_pairs[index] = (left_value, right_value, weight)
         if index == 2
-            gauss_sum += _quadrature_constant(T, gauss_weights[1]) * pair_sum
+            gauss_sum += gauss_weights[1] * pair_sum
         elseif index == 4
-            gauss_sum += _quadrature_constant(T, gauss_weights[2]) * pair_sum
+            gauss_sum += gauss_weights[2] * pair_sum
         elseif index == 6
-            gauss_sum += _quadrature_constant(T, gauss_weights[3]) * pair_sum
+            gauss_sum += gauss_weights[3] * pair_sum
         end
     end
 
@@ -323,6 +338,14 @@ function proper_time_between(
     first, second = T(first_time), T(second_time)
     _check_coordinate_domain(worldline, first)
     _check_coordinate_domain(worldline, second)
+    # Declared worldline kinks inside the interval always split panels. A kink
+    # within one ulp of an endpoint is skipped: its sliver panel would have no
+    # representable midpoint, and the non-smooth region it isolates is below
+    # coordinate-time resolution anyway.
+    left, right = minmax(first, second)
+    declared = T[
+        k for k in worldline_kinks(worldline) if prevfloat(k) > left && nextfloat(k) < right
+    ]
     return _integrated_proper_time(
         spacetime,
         worldline,
@@ -331,7 +354,7 @@ function proper_time_between(
         rtol=relative_tolerance,
         atol=absolute_tolerance,
         max_evaluations=Int(max_evaluations),
-        breakpoints=breakpoints,
+        breakpoints=isempty(declared) ? breakpoints : T[T.(collect(breakpoints)); declared],
     )
 end
 
@@ -599,6 +622,8 @@ function coordinate_time_after_proper_time(
     isfinite(target) && target >= zero(T) ||
         throw(ArgumentError("proper-time duration must be finite and nonnegative"))
     future_breakpoints = _prepare_future_breakpoints(T, breakpoints, start)
+    # Declared worldline kinks after the start also bound quadrature panels;
+    # proper_time_between adds them itself, so they are not duplicated here.
     target == zero(T) && return start
 
     search_max = _inversion_search_max(worldline, start, max_coordinate_time)

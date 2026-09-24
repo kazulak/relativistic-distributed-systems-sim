@@ -21,6 +21,37 @@ jobs:
       - name: Run harness unit tests
         run: python3 -m unittest discover -s test/formal_validation -v
 
+  experiment-smoke:
+    name: Experiment pipeline smoke
+    runs-on: ubuntu-latest
+    env:
+      JULIA_DEPOT_PATH: ${{ runner.temp }}/rds-julia-depot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - name: Prepare clean writable depot
+        run: mkdir -p "$JULIA_DEPOT_PATH"
+      - name: Instantiate core environment
+        run: julia --project=. --startup-file=no -e 'import Pkg; Pkg.instantiate()'
+      # Each sweep exits nonzero on any failed run, safety-flag failure, or
+      # causal-bound violation; each analyzer exits nonzero on the same.
+      - name: RQ1 smoke sweeps
+        run: |
+          out="$RUNNER_TEMP/rq1"
+          julia --project=. --startup-file=no experiments/run_rq1.jl --sweep e1-smoke --seeds 1:2 --out "$out/e1"
+          julia --project=. --startup-file=no experiments/run_rq1.jl --sweep e2-smoke --seeds 1:2 --out "$out/e2"
+          julia --project=. --startup-file=no experiments/analyze_rq1.jl "$out/e1/runs.tsv"
+          julia --project=. --startup-file=no experiments/analyze_rq1.jl "$out/e2/runs.tsv"
+      # Tuning-role smoke over the full E3 grid; completion.json must report
+      # zero failed/invalid/error runs (solver regressions surface here).
+      - name: E3 smoke sweep
+        run: |
+          out="$RUNNER_TEMP/e3"
+          julia --project=. --startup-file=no experiments/run_e3.jl --role tuning --replicas 1:1 --out "$out"
+          julia --startup-file=no experiments/check_completion.jl "$out/completion.json"
+
   test:
     name: Julia ${{ matrix.julia-version }}
     runs-on: ubuntu-latest

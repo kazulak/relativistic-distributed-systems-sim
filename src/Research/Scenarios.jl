@@ -465,6 +465,9 @@ function trajectory_change_scenario(;
             tmax=Inf,
             validate_at=window.start_coordinate,
             audit_times=collect(audit_points),
+            # The clock rate kinks at the onset (acceleration jumps from 0);
+            # declaring it lets quadrature split panels there.
+            kinks=alpha == 0 ? () : (onset,),
         )
     end
 
@@ -504,93 +507,287 @@ function trajectory_change_scenario(;
 end
 
 
+# ---------------------------------------------------------------------------
+# Causal quorum completion bound (Claim C3, docs/CAUSAL_QUORUM_BOUND.md)
+# ---------------------------------------------------------------------------
+
+"""Relative component of the C3 oracle tolerance (see `causal_bound_tolerance`)."""
+const CAUSAL_BOUND_RTOL = 1.0e-9
+
+"""Absolute floor of the C3 oracle tolerance, in client proper-time units."""
+const CAUSAL_BOUND_ATOL_FLOOR = 4096eps(Float64)
+
 """
-    causal_quorum_bound(config::ScenarioConfig, client_node::Int, client_invoke_coord_time::Float64; leader_node::Union{Nothing, Int}=nothing)
+    causal_bound_tolerance(scale; rtol=CAUSAL_BOUND_RTOL, atol_floor=CAUSAL_BOUND_ATOL_FLOOR)
 
-Compute the physical causal lower bound (Proposition 1, Claim C3) on proper time elapsed along the client's worldline
-for a strict-quorum write operation invoked at `client_invoke_coord_time`.
-If `leader_node` is specified, evaluates for that leader; if `nothing`, evaluates the minimum over all cluster members.
+Scale-aware numerical tolerance used by the C3 oracle:
+`max(atol_floor, rtol * abs(scale))`, where `scale` is the larger of the bound
+and the measured latency for the audited operation.
 """
-function causal_quorum_bound(
-    config::ScenarioConfig,
-    client_node::Int,
-    client_invoke_coord_time::Float64;
-    leader_node::Union{Nothing, Int}=nothing,
-)
-    validate_config(config)
-    client_worldline = config.worldlines[client_node]
-    candidates = isnothing(leader_node) ? config.raft.members : [leader_node]
-    max_t = max(
-        config.window.censor_coordinate + 100 * config.raft.election_timeout_max,
-        client_invoke_coord_time + 100 * config.raft.election_timeout_max,
-    )
+causal_bound_tolerance(
+    scale::Real;
+    rtol::Real=CAUSAL_BOUND_RTOL,
+    atol_floor::Real=CAUSAL_BOUND_ATOL_FLOOR,
+) = max(Float64(atol_floor), Float64(rtol) * abs(Float64(scale)))
 
-    bounds = Float64[]
-    for leader in candidates
-        leader_worldline = config.worldlines[leader]
-        t_start = client_invoke_coord_time
+@inline _oracle_position(worldline, t) = worldline_event(worldline, t).x
 
-        # Leader replication to peers and return
-        e_leader = worldline_event(leader_worldline, t_start)
-        ack_times = Float64[t_start] # leader's own write
-        for peer in config.raft.members
-            peer == leader && continue
-            t_out = _try_light_cone_intersection(config.spacetime, e_leader, config.worldlines[peer], max_t)
-            if isfinite(t_out)
-                out_event = worldline_event(config.worldlines[peer], t_out)
-                t_in = _try_light_cone_intersection(config.spacetime, out_event, leader_worldline, max_t)
-                push!(ack_times, t_in)
-            else
-                push!(ack_times, Inf)
-            end
-        end
-        sort!(ack_times)
-        q = quorum_size(config.raft)
-        t_commit = ack_times[q]
-        !isfinite(t_commit) && continue
-
-        # Proper time on client worldline from invocation to commit
-        dt_proper = Float64(proper_time_between(
-            config.spacetime,
-            client_worldline,
-            t_start,
-            t_commit,
-        ))
-        push!(bounds, dt_proper)
+@inline function _oracle_distance(a, b)
+    acc = 0.0
+    for k in eachindex(a)
+        acc += abs2(Float64(a[k]) - Float64(b[k]))
     end
-    return isempty(bounds) ? Inf : minimum(bounds)
+    return sqrt(acc)
 end
 
 """
-    verify_causal_quorum_bounds(config::ScenarioConfig, operations::Vector{OperationMetric}; tolerance::Float64=4096eps(Float64))
+Earliest coordinate time at which a null signal emitted at `(t_emit, x_emit)`
+reaches `receiver`, computed *independently* of `light_cone_intersection`.
 
-Audit committed write operations against the causal quorum completion bound (Claim C3).
-Returns `(ok::Bool, min_margin::Float64, violations::Vector{String})`.
+The residual `f(t) = c (t - t_emit) - |x_R(t) - x_emit|` is strictly increasing
+for any timelike receiver (`f'(t) >= c - |v_R(t)| > 0`), so it has at most one
+root on `[t_emit, Inf)`. The root is bracketed by doubling and then bisected to
+adjacent floating-point numbers; the returned value is the lower bracket end
+(`f < 0`), which does not exceed the true arrival time up to rounding in `f`.
+Returns `Inf` if no arrival occurs by `max_t` (e.g. behind a Rindler horizon).
+Only worldline kinematics (`worldline_event` positions) is shared with the engine.
+"""
+function _oracle_null_arrival(
+    spacetime::MinkowskiSpacetime{Float64},
+    t_emit::Float64,
+    x_emit,
+    receiver::AbstractWorldline{Float64},
+    max_t::Float64,
+)
+    c = Float64(spacetime.c)
+    residual(t) = c * (t - t_emit) - _oracle_distance(_oracle_position(receiver, t), x_emit)
+    residual(t_emit) >= 0.0 && return t_emit
+    lo = t_emit
+    step = max(
+        _oracle_distance(_oracle_position(receiver, t_emit), x_emit) / c,
+        4eps(max(abs(t_emit), 1.0)),
+    )
+    hi = t_emit + step
+    while residual(hi) < 0.0
+        hi >= max_t && return Inf
+        lo = hi
+        step *= 2.0
+        hi = min(t_emit + step, max(max_t, lo))
+    end
+    for _ in 1:2000
+        mid = lo + (hi - lo) / 2
+        (mid <= lo || mid >= hi) && break
+        if residual(mid) < 0.0
+            lo = mid
+        else
+            hi = mid
+        end
+    end
+    return lo > max_t ? Inf : lo
+end
+
+function _causal_bound_horizon(config::ScenarioConfig, t0::Float64)
+    slack = 100 * config.raft.election_timeout_max
+    return max(config.window.censor_coordinate + slack, t0 + slack)
+end
+
+"""
+    causal_quorum_chain(config, client_node, client_invoke_coord_time, leader_node;
+                        include_client_legs=true)
+
+Evaluate the Proposition 1 causal chain for one fixed leader `leader_node` and
+return a NamedTuple
+
+    (leader, t_invoke, t_leader_receive, t_commit, t_response, bound)
+
+Coordinate times follow docs/CAUSAL_QUORUM_BOUND.md §3: `t_leader_receive` is
+t1 (client->leader null arrival; `t_invoke` if the client node is the leader),
+`t_commit` is the Q-th smallest acknowledgement time at the leader (the
+leader's own log write counts at t1), `t_response` is the null arrival on the
+client worldline of the reply emitted at `t_commit`, and `bound` is the client
+proper time from `t_invoke` to `t_response`. Unreachable legs give `Inf`.
+
+With `include_client_legs=false` segments 1 and 5 are dropped (t1 = t0 and
+t_response = t_commit): the weaker replication-only bound that applies when the
+client is attached to the leader without physical propagation.
+Null legs are solved by the independent bisection solver `_oracle_null_arrival`,
+not by the engine's `light_cone_intersection`.
+"""
+function causal_quorum_chain(
+    config::ScenarioConfig,
+    client_node::Integer,
+    client_invoke_coord_time::Real,
+    leader_node::Integer;
+    include_client_legs::Bool=true,
+)
+    members = config.raft.members
+    client_node in eachindex(config.worldlines) ||
+        throw(ArgumentError("client_node $client_node has no worldline"))
+    leader_node in members ||
+        throw(ArgumentError("leader_node $leader_node is not a cluster member"))
+    spacetime = config.spacetime
+    t0 = Float64(client_invoke_coord_time)
+    max_t = _causal_bound_horizon(config, t0)
+    client_worldline = config.worldlines[client_node]
+    leader_worldline = config.worldlines[leader_node]
+    direct = !include_client_legs || leader_node == client_node
+    unreachable = (
+        leader=Int(leader_node),
+        t_invoke=t0,
+        t_leader_receive=Inf,
+        t_commit=Inf,
+        t_response=Inf,
+        bound=Inf,
+    )
+
+    # Segment 1: client -> leader.
+    t1 = direct ? t0 :
+         _oracle_null_arrival(spacetime, t0, _oracle_position(client_worldline, t0), leader_worldline, max_t)
+    isfinite(t1) || return unreachable
+
+    # Segments 2-3: leader -> peer -> leader; segment 4: quorum at the leader.
+    x_leader_t1 = _oracle_position(leader_worldline, t1)
+    ack_times = Float64[t1]
+    for peer in members
+        peer == leader_node && continue
+        peer_worldline = config.worldlines[peer]
+        t2 = _oracle_null_arrival(spacetime, t1, x_leader_t1, peer_worldline, max_t)
+        t3 = isfinite(t2) ?
+             _oracle_null_arrival(spacetime, t2, _oracle_position(peer_worldline, t2), leader_worldline, max_t) :
+             Inf
+        push!(ack_times, t3)
+    end
+    sort!(ack_times)
+    t_commit = ack_times[quorum_size(config.raft)]
+    isfinite(t_commit) || return merge(unreachable, (t_leader_receive=t1,))
+
+    # Segment 5: leader -> client.
+    t_resp = direct ? t_commit :
+             _oracle_null_arrival(
+        spacetime,
+        t_commit,
+        _oracle_position(leader_worldline, t_commit),
+        client_worldline,
+        max_t,
+    )
+    isfinite(t_resp) ||
+        return merge(unreachable, (t_leader_receive=t1, t_commit=t_commit))
+    bound = t_resp == t0 ? 0.0 :
+            Float64(proper_time_between(spacetime, client_worldline, t0, t_resp))
+    return (
+        leader=Int(leader_node),
+        t_invoke=t0,
+        t_leader_receive=t1,
+        t_commit=t_commit,
+        t_response=t_resp,
+        bound=bound,
+    )
+end
+
+"""
+    causal_quorum_bound(config::ScenarioConfig, client_node::Integer, client_invoke_coord_time::Real;
+                        leader_node::Union{Nothing,Integer}=nothing,
+                        include_client_legs::Bool=true) -> Float64
+
+Proposition 1 (Claim C3) lower bound on the client proper time elapsed between
+invoking a strict-quorum write at coordinate time `client_invoke_coord_time`
+and receiving its committed response, via the full five-segment causal chain
+client -> leader -> peers -> leader (quorum) -> client (see `causal_quorum_chain`).
+
+With `leader_node=nothing` (default) the bound is the minimum over every
+cluster member as the accepting leader, which holds regardless of which node
+Raft elects or how redirects route the request; pass `leader_node` to fix it.
+Returns `Inf` if no leader can close the chain before the analysis horizon.
+"""
+function causal_quorum_bound(
+    config::ScenarioConfig,
+    client_node::Integer,
+    client_invoke_coord_time::Real;
+    leader_node::Union{Nothing,Integer}=nothing,
+    include_client_legs::Bool=true,
+)
+    candidates = isnothing(leader_node) ? config.raft.members : (leader_node,)
+    best = Inf
+    for leader in candidates
+        chain = causal_quorum_chain(
+            config,
+            client_node,
+            client_invoke_coord_time,
+            leader;
+            include_client_legs=include_client_legs,
+        )
+        best = min(best, chain.bound)
+    end
+    return best
+end
+
+"""
+    verify_causal_quorum_bounds(config::ScenarioConfig, operations::AbstractVector{OperationMetric};
+                                leader_node=nothing, include_client_legs=true,
+                                rtol=CAUSAL_BOUND_RTOL, atol_floor=CAUSAL_BOUND_ATOL_FLOOR)
+
+Audit every committed non-read (write) operation against `causal_quorum_bound`
+for `config.workload.client_node` (Claim C3). Returns a NamedTuple
+
+    (ok::Bool, audited_writes::Int, min_margin::Float64, violations::Vector{String})
+
+`margin = latency_proper - bound`. An operation violates when
+`margin < -causal_bound_tolerance(max(bound, latency))`, when its bound is
+infinite, or when it is committed without a recorded latency; `ok` is
+`isempty(violations)`. Vacuity rule: when no finite margin was computed
+(e.g. `audited_writes == 0`), `min_margin` is `NaN`, never `0.0`, and the run
+is no evidence for C3.
 """
 function verify_causal_quorum_bounds(
     config::ScenarioConfig,
-    operations::Vector{OperationMetric};
-    tolerance::Float64=4096eps(Float64),
+    operations::AbstractVector{OperationMetric};
+    leader_node::Union{Nothing,Integer}=nothing,
+    include_client_legs::Bool=true,
+    rtol::Real=CAUSAL_BOUND_RTOL,
+    atol_floor::Real=CAUSAL_BOUND_ATOL_FLOOR,
 )
     violations = String[]
+    audited = 0
     min_margin = Inf
+    client = config.workload.client_node
     for op in operations
-        (op.outcome == :committed && op.operation_kind != :read && !isnothing(op.latency_proper)) || continue
-        bound = causal_quorum_bound(config, config.workload.client_node, op.invoked_coordinate)
-        if !isfinite(bound)
-            push!(violations, "operation $(op.request_id) committed at latency $(op.latency_proper) but causal bound is infinite")
+        (op.outcome == :committed && op.operation_kind != :read) || continue
+        audited += 1
+        if isnothing(op.latency_proper)
+            push!(violations, "operation $(op.request_id) is committed but has no recorded proper latency")
             continue
         end
-        margin = op.latency_proper - bound
+        latency = Float64(op.latency_proper)
+        bound = causal_quorum_bound(
+            config,
+            client,
+            op.invoked_coordinate;
+            leader_node=leader_node,
+            include_client_legs=include_client_legs,
+        )
+        if !isfinite(bound)
+            push!(
+                violations,
+                "operation $(op.request_id) committed at proper latency $latency but its causal bound is infinite",
+            )
+            continue
+        end
+        margin = latency - bound
         min_margin = min(min_margin, margin)
+        tolerance = causal_bound_tolerance(max(bound, latency); rtol=rtol, atol_floor=atol_floor)
         if margin < -tolerance
             push!(
                 violations,
-                "operation $(op.request_id) committed at proper latency $(op.latency_proper) below causal quorum bound $bound (margin: $margin)",
+                "operation $(op.request_id) committed at proper latency $latency below causal quorum bound $bound (margin $margin, tolerance $tolerance)",
             )
         end
     end
-    return (isempty(violations), isinf(min_margin) ? 0.0 : min_margin, violations)
+    return (
+        ok=isempty(violations),
+        audited_writes=audited,
+        min_margin=isfinite(min_margin) ? min_margin : NaN,
+        violations=violations,
+    )
 end
 
 

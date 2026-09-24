@@ -10,6 +10,15 @@ end
 
 struct ClientReplyEvent
     response::ClientResponse
+    from::Int
+    send_coordinate::Float64
+end
+
+"""A client request arriving at a cluster node after causal propagation."""
+struct ClientRequestDelivery
+    request_id::RequestID
+    from::Int
+    send_coordinate::Float64
 end
 
 struct ClientDeadlineEvent
@@ -144,31 +153,47 @@ function _observe_transition!(
     node_id::Int,
 )
     node = state.cluster.nodes[node_id]
+    timing = state.timing
     if node.durable.current_term > before_term && node.volatile.role == Candidate
         state.accumulator.elections_started += 1
-        if !isnothing(state.timing)
-            state.timing.election_fires += 1
-            runtime = get(state.timing.runtimes, node_id, nothing)
+        if !isnothing(timing)
+            runtime = get(timing.runtimes, node_id, nothing)
             !isnothing(runtime) && note_election_started!(runtime)
-            if !isnothing(_active_leader(state))
-                state.timing.suspicions += 1
-            elseif !isempty(state.timing.open_crashes)
-                resolved = nothing
-                for (crashed, coordinate) in state.timing.open_crashes
-                    if isnothing(resolved) || coordinate > resolved[2]
-                        resolved = (crashed, coordinate)
-                    end
+            if in_measurement_window(timing, state.scheduler.now)
+                # Election-timer fire (prereg §3). A fire is a false suspicion
+                # when it moves a follower to Candidate while exactly one
+                # leader is alive at this coordinate time.
+                timing.election_fires += 1
+                if !isnothing(_active_leader(state))
+                    timing.leader_present_fires += 1
+                    before_role == Follower && (timing.suspicions += 1)
                 end
+            end
+        end
+    end
+    if !isnothing(timing) && before_role != Leader && node.volatile.role == Leader &&
+       !isempty(timing.open_crashes)
+        # Crash-detection delay (prereg §3): from the crash of the sole active
+        # leader to the *successful* election of a new leader, in proper time
+        # along the winner's worldline. Recorded at election completion, not
+        # at candidacy start.
+        term = UInt64(node.durable.current_term)
+        remaining = Tuple{Int,Float64,UInt64}[]
+        for entry in timing.open_crashes
+            crashed, coordinate, crashed_term = entry
+            if term > crashed_term && coordinate <= state.scheduler.now
                 delay = proper_time_between(
                     state.config.spacetime,
                     state.config.worldlines[node_id],
-                    resolved[2],
+                    coordinate,
                     state.scheduler.now,
                 )
-                push!(state.timing.detection_delays_proper, Float64(delay))
-                filter!(entry -> entry !== resolved, state.timing.open_crashes)
+                push!(timing.detection_delays_proper, Float64(delay))
+            else
+                push!(remaining, entry)
             end
         end
+        timing.open_crashes = remaining
     end
     state.accumulator.maximum_term = max(
         state.accumulator.maximum_term,
@@ -208,6 +233,55 @@ function _apply_transition!(state::ResearchRunState, node_id::Int, input::NodeIn
     return effects
 end
 
+"""
+Geometry-oracle (O0) band: predict, from the true worldlines, when the
+follower would receive the leader heartbeat emitted `miss_tolerance`
+heartbeat intervals (source proper time) after the leader's latest emission,
+and centre the deadline so the node's randomized draw never precedes that
+prediction. Falls back to the cold-start band when no leader is known.
+Reference arm only: it reads information no real detector has.
+"""
+function _oracle_band(state::ResearchRunState, node_id::Int, now_local::Float64, runtime)
+    timing = state.timing
+    spec = timing.spec
+    leader = _active_leader(state)
+    if isnothing(leader) || leader.id == node_id || !haskey(timing.leader_last_emit, leader.id)
+        return election_band(runtime, spec)
+    end
+    config = state.config
+    _, tau_emit, _ = timing.leader_last_emit[leader.id]
+    heartbeat = config.raft.heartbeat_interval
+    offset = spec.miss_tolerance * heartbeat
+    try
+        emit_coordinate = coordinate_time(
+            state.clocks[leader.id],
+            tau_emit + spec.miss_tolerance * heartbeat,
+        )
+        intersection = light_cone_intersection(
+            config.spacetime,
+            worldline_event(config.worldlines[leader.id], emit_coordinate),
+            config.worldlines[node_id];
+            max_coordinate_time=emit_coordinate + 100config.raft.election_timeout_max,
+        )
+        network = config.network
+        slack = network.processing_delay + network.delay_jitter +
+                (network.reorder_probability > 0.0 ? network.reorder_delay : 0.0)
+        arrival = Float64(intersection.reception.t) + slack
+        predicted = local_time(state.clocks[node_id], arrival) - now_local
+        predicted > 0.0 && (offset = predicted)
+    catch error
+        error isa NoFutureLightConeIntersection || error isa LightConeSearchExhausted ||
+            rethrow()
+    end
+    # The engine rescales the node's draw in [min, max] by midpoint/expected;
+    # this midpoint maps the smallest draw exactly onto the prediction.
+    raft = config.raft
+    centre = offset * (raft.election_timeout_min + raft.election_timeout_max) /
+             (2raft.election_timeout_min)
+    return (clamp(centre, spec.budget.minimum, spec.budget.maximum),
+            clamp(centre, spec.budget.minimum, spec.budget.maximum))
+end
+
 function _schedule_timer!(state::ResearchRunState, effect::ResetTimer, parent)
     timer_name = effect.kind == ElectionTimer ? :election : :heartbeat
     deadline_local = effect.deadline_local
@@ -223,7 +297,9 @@ function _schedule_timer!(state::ResearchRunState, effect::ResetTimer, parent)
         now_local = local_time(state.clocks[effect.node], state.scheduler.now)
         armed_span = effect.deadline_local - now_local
         armed_span > 0.0 || (armed_span = spec.base_timeout)
-        band_lo, band_hi = election_band(runtime, spec)
+        band_lo, band_hi = spec.arm === :O0 ?
+            _oracle_band(state, effect.node, now_local, runtime) :
+            election_band(runtime, spec)
         target_midpoint = (band_lo + band_hi) / 2
         expected_internal =
             (
@@ -239,17 +315,41 @@ function _schedule_timer!(state::ResearchRunState, effect::ResetTimer, parent)
             new_span,
         )
     end
-    event = schedule_local_timer!(
+    clock = state.clocks[effect.node]
+    coordinate_deadline = _timer_coordinate(clock, deadline_local, state.scheduler.now)
+    event = schedule!(
         state.scheduler,
-        state.clocks[effect.node],
-        deadline_local,
+        coordinate_deadline,
         effect.node,
-        timer_name,
-        effect.generation;
+        TimerFired(timer_name, UInt64(effect.generation));
         causal_parent=parent,
     )
     state.timer_epochs[event.event_id] = effect.crash_epoch
     return event
+end
+
+"""
+Coordinate time at which a node-local timer with deadline `deadline_local`
+fires. The proper-time clock inversion is quadrature-based for parametric
+worldlines, so `local_time(clock, coordinate_time(clock, d))` can land a few
+ulps *before* `d`; Raft then rejects the timer as early (8 eps tolerance) and,
+because it is never re-armed, a leader silently stops heartbeating. The
+coordinate is therefore nudged forward until the local reading reaches the
+deadline (a no-op for closed-form clocks). Mirrors `schedule_local_timer!`
+otherwise.
+"""
+function _timer_coordinate(clock::AbstractLocalClock, deadline_local::Float64, now::Float64)
+    coordinate = coordinate_time(clock, deadline_local)
+    coordinate + 8eps(max(abs(coordinate), 1.0)) >= now ||
+        throw(ArgumentError("local timer deadline maps into the scheduler past"))
+    coordinate = max(coordinate, now)
+    step = 4eps(max(abs(coordinate), 1.0))
+    for _ in 1:64
+        local_time(clock, coordinate) >= deadline_local && return coordinate
+        coordinate += step
+        step *= 2
+    end
+    throw(ArgumentError("proper-time clock inversion failed to reach the timer deadline"))
 end
 
 function _apply_effects!(state::ResearchRunState, effects, parent)
@@ -260,20 +360,32 @@ function _apply_effects!(state::ResearchRunState, effects, parent)
             state.next_message_id == typemax(UInt64) &&
                 throw(OverflowError("research message id exhausted"))
             wire_bytes = _wire_bytes(effect.message, state.config.network)
-            if !isnothing(state.timing) &&
-                   state.timing.spec.level >= 1 &&
-                   effect.message isa AppendEntriesRequest
+            if !isnothing(state.timing) && effect.message isa AppendEntriesRequest
                 leader = _active_leader(state)
                 if !isnothing(leader) && leader.id == effect.from &&
                        leader.durable.current_term == UInt64(effect.message.term)
-                    state.timing.heartbeat_sequences[effect.from] += UInt64(1)
-                    sequence = state.timing.heartbeat_sequences[effect.from]
-                    tau_emit = local_time(state.clocks[effect.from], state.scheduler.now)
-                    state.timing.heartbeat_meta[state.next_message_id + UInt64(1)] =
-                        (sequence, tau_emit)
-                    surcharge = metadata_byte_surcharge(state.timing.spec.level)
-                    wire_bytes += surcharge
-                    state.timing.metadata_bytes_sent += surcharge
+                    timing = state.timing
+                    term = UInt64(effect.message.term)
+                    cached = get(timing.leader_last_emit, effect.from, nothing)
+                    # One proper-time evaluation per broadcast instant.
+                    tau_emit = if !isnothing(cached) && cached[3] == state.scheduler.now
+                        cached[2]
+                    else
+                        local_time(state.clocks[effect.from], state.scheduler.now)
+                    end
+                    timing.leader_last_emit[effect.from] = (term, tau_emit, state.scheduler.now)
+                    # Engine-side ground truth for dsr_measured (not on the wire).
+                    timing.truth_emit[state.next_message_id + UInt64(1)] =
+                        (effect.from, term, tau_emit)
+                    if timing.spec.level >= 1
+                        timing.heartbeat_sequences[effect.from] += UInt64(1)
+                        sequence = timing.heartbeat_sequences[effect.from]
+                        timing.heartbeat_meta[state.next_message_id + UInt64(1)] =
+                            (sequence, tau_emit)
+                        surcharge = metadata_byte_surcharge(timing.spec.level)
+                        wire_bytes += surcharge
+                        timing.metadata_bytes_sent += surcharge
+                    end
                 end
             end
             state.next_message_id += 1
@@ -301,14 +413,60 @@ function _apply_effects!(state::ResearchRunState, effects, parent)
         elseif effect isa ReplyClient
             haskey(state.operations, effect.response.request_id) ||
                 throw(ArgumentError("Raft replied to an unknown research client request"))
+            client_node = state.config.workload.client_node
+            arrival = _client_arrival(state, effect.node, client_node, state.scheduler.now)
+            isnothing(arrival) && continue
             schedule!(
                 state.scheduler,
-                state.scheduler.now,
-                state.config.workload.client_node,
-                ClientReplyEvent(effect.response);
+                arrival,
+                client_node,
+                ClientReplyEvent(effect.response, effect.node, state.scheduler.now);
                 causal_parent=parent,
             )
         end
+    end
+    return nothing
+end
+
+"""
+    _client_arrival(state, from, to, send_coordinate)
+
+Coordinate time at which client traffic sent by node `from` at
+`send_coordinate` reaches node `to`: the earliest future light-cone
+intersection plus the network processing delay, or the send time itself when
+sender and receiver are the same node. Client traffic is not subject to the
+protocol links' loss, jitter, reordering, or queueing (a modeling assumption
+recorded in docs/EXPERIMENTS.md); it is subject to propagation. Returns
+`nothing` when no intersection exists within the analysis horizon.
+"""
+function _client_arrival(state::ResearchRunState, from::Int, to::Int, send_coordinate::Float64)
+    from == to && return send_coordinate
+    intersection = try
+        light_cone_intersection(
+            state.config.spacetime,
+            worldline_event(state.config.worldlines[from], send_coordinate),
+            state.config.worldlines[to];
+            max_coordinate_time=max(
+                state.config.window.censor_coordinate + 100state.config.raft.election_timeout_max,
+                send_coordinate + 100state.config.raft.election_timeout_max,
+            ),
+        )
+    catch error
+        (error isa NoFutureLightConeIntersection || error isa LightConeSearchExhausted) && return nothing
+        rethrow(error)
+    end
+    return Float64(intersection.reception.t) + state.config.network.processing_delay
+end
+
+"""Throw (and flag the causal-delivery oracle) unless receive is in send's causal future."""
+function _check_client_causality!(state::ResearchRunState, from::Int, send_coordinate::Float64,
+                                  to::Int, receive_coordinate::Float64, what::String)
+    send_event = worldline_event(state.config.worldlines[from], send_coordinate)
+    receive_event = worldline_event(state.config.worldlines[to], receive_coordinate)
+    if !is_future_causal(state.config.spacetime, send_event, receive_event)
+        state.causal_delivery_ok = false
+        push!(state.violations, "$what was delivered outside its sender's future light cone")
+        throw(InvalidDeliveryError(last(state.violations)))
     end
     return nothing
 end
@@ -444,6 +602,38 @@ function _deliver!(state::ResearchRunState, event::ScheduledEvent, delivery::Mes
     return nothing
 end
 
+"""
+Record one realized leader→follower rate-ratio sample: receiver-proper
+inter-arrival over source-proper emission interval of consecutive in-term
+leader AppendEntries, both arriving inside the measurement window. Pairs whose
+emission spacing is below half a heartbeat (client-triggered broadcasts) are
+skipped to keep jitter from dominating; reordered copies never move the
+reference backward.
+"""
+function _sample_realized_dsr!(
+    timing::RunTimingState,
+    envelope::MessageEnvelope,
+    arrival_coordinate::Float64,
+    tau_arrive::Float64,
+    heartbeat::Float64,
+)
+    truth = get(timing.truth_emit, envelope.message_id, nothing)
+    isnothing(truth) && return nothing
+    leader, term, tau_emit = truth
+    key = (leader, envelope.to)
+    previous = get(timing.last_heartbeat, key, nothing)
+    if !isnothing(previous) && previous[1] == term
+        tau_emit > previous[2] || return nothing
+        emitted = tau_emit - previous[2]
+        emitted < 0.5heartbeat && return nothing
+        if in_measurement_window(timing, arrival_coordinate)
+            push!(timing.dsr_samples, (tau_arrive - previous[3]) / emitted)
+        end
+    end
+    timing.last_heartbeat[key] = (term, tau_emit, tau_arrive)
+    return nothing
+end
+
 function _observe_heartbeat_delivery!(state::ResearchRunState, envelope::MessageEnvelope, event::ScheduledEvent)
     isnothing(state.timing) && return nothing
     envelope.payload isa AppendEntriesRequest || return nothing
@@ -451,6 +641,7 @@ function _observe_heartbeat_delivery!(state::ResearchRunState, envelope::Message
     runtime = get(state.timing.runtimes, envelope.to, nothing)
     isnothing(runtime) && return nothing
     tau_arrive = local_time(state.clocks[envelope.to], event.time)
+    _sample_realized_dsr!(state.timing, envelope, event.time, tau_arrive, state.config.raft.heartbeat_interval)
     observe_arrival!(
         runtime,
         state.timing.spec,
@@ -540,11 +731,34 @@ function _attempt_client!(state::ResearchRunState, event::ScheduledEvent, attemp
         client_node
     end
     operation.attempts += 1
-    _apply_transition!(state, target, ClientInput(operation.request), event.event_id)
+    # The request propagates from the client's worldline to the target; it is
+    # applied only on arrival (docs/DEVIATIONS.md D-14).
+    arrival = _client_arrival(state, client_node, target, event.time)
+    isnothing(arrival) && return nothing
+    schedule!(
+        state.scheduler,
+        arrival,
+        target,
+        ClientRequestDelivery(operation.request.request_id, client_node, event.time);
+        causal_parent=event.event_id,
+    )
+    return nothing
+end
+
+function _deliver_client_request!(state::ResearchRunState, event::ScheduledEvent, delivery::ClientRequestDelivery)
+    _check_client_causality!(state, delivery.from, delivery.send_coordinate, event.target, event.time,
+                             "client request $(delivery.request_id)")
+    node = get(state.cluster.nodes, event.target, nothing)
+    # A request reaching a crashed node is lost; the client's retry covers it.
+    (isnothing(node) || !node.running) && return nothing
+    operation = state.operations[delivery.request_id]
+    _apply_transition!(state, event.target, ClientInput(operation.request), event.event_id)
     return nothing
 end
 
 function _client_reply!(state::ResearchRunState, event::ScheduledEvent, reply::ClientReplyEvent)
+    _check_client_causality!(state, reply.from, reply.send_coordinate, event.target, event.time,
+                             "client reply for $(reply.response.request_id)")
     response = reply.response
     operation = state.operations[response.request_id]
     operation.outcome in (:committed, :censored) && return nothing
@@ -571,6 +785,24 @@ function _client_reply!(state::ResearchRunState, event::ScheduledEvent, reply::C
     return nothing
 end
 
+function _crash_node!(state::ResearchRunState, node_id::Int, event::ScheduledEvent)
+    if !isnothing(state.timing)
+        # Only a crash of the sole active leader creates a detection
+        # obligation; follower crashes need no failure detection.
+        leader = _active_leader(state)
+        if !isnothing(leader) && leader.id == node_id
+            push!(
+                state.timing.open_crashes,
+                (node_id, event.time, UInt64(leader.durable.current_term)),
+            )
+            state.timing.leader_crashes += 1
+        end
+        state.timing.spec.reset_on_crash && reset_runtime!(state.timing, node_id)
+    end
+    _apply_transition!(state, node_id, CrashInput(), event.event_id)
+    return nothing
+end
+
 function _dispatch!(state::ResearchRunState, event::ScheduledEvent)
     payload = event.payload
     if payload isa TimerFired
@@ -590,17 +822,28 @@ function _dispatch!(state::ResearchRunState, event::ScheduledEvent)
     elseif payload isa MessageDelivery
         _deliver!(state, event, payload)
     elseif payload isa CrashNode
-        if !isnothing(state.timing)
-            push!(state.timing.open_crashes, (payload.node, event.time))
-            state.timing.spec.reset_on_crash && reset_runtime!(state.timing, payload.node)
+        _crash_node!(state, payload.node, event)
+    elseif payload isa CrashLeader
+        leader = _active_leader(state)
+        if !isnothing(leader)
+            crashed = leader.id
+            _crash_node!(state, crashed, event)
+            schedule!(
+                state.scheduler,
+                event.time + payload.downtime,
+                crashed,
+                RecoverNode(crashed);
+                causal_parent=event.event_id,
+            )
         end
-        _apply_transition!(state, payload.node, CrashInput(), event.event_id)
     elseif payload isa RecoverNode
         _apply_transition!(state, payload.node, RecoverInput(), event.event_id)
     elseif payload isa SetLinkAvailability
         apply_fault!(state.transport, payload)
     elseif payload isa ClientAttemptEvent
         _attempt_client!(state, event, payload)
+    elseif payload isa ClientRequestDelivery
+        _deliver_client_request!(state, event, payload)
     elseif payload isa ClientReplyEvent
         _client_reply!(state, event, payload)
     elseif payload isa ClientDeadlineEvent
@@ -656,7 +899,12 @@ function _initialize_state(config::ScenarioConfig, seed::UInt64, timing::Union{N
         true,
         String[],
         nothing,
-        isnothing(timing) ? nothing : RunTimingState(timing, collect(config.raft.members)),
+        isnothing(timing) ? nothing : RunTimingState(
+            timing,
+            collect(config.raft.members);
+            measurement_start=config.window.warmup_end_coordinate,
+            measurement_end=config.window.measurement_end_coordinate,
+        ),
     )
     for node_id in config.raft.members
         _apply_effects!(state, initial_effects[node_id], nothing)
@@ -822,17 +1070,24 @@ function run_scenario(
         nothing
     else
         timing_state = state.timing
-        elections = max(timing_state.election_fires, 1)
+        fires = timing_state.election_fires
+        followers = length(config.raft.members) - 1
+        follower_heartbeats = state.accumulator.leader_coordinate_time * followers /
+                              config.raft.heartbeat_interval
         AdaptationDiagnostics(
             timing_state.spec.arm,
             timing_state.spec.level,
             timing_fingerprint(timing_state.spec),
             timing_state.suspicions,
-            timing_state.election_fires,
-            timing_state.suspicions / elections,
+            fires,
+            fires == 0 ? NaN : timing_state.suspicions / fires,
             copy(timing_state.detection_delays_proper),
             length(timing_state.open_crashes),
             timing_state.metadata_bytes_sent,
+            timing_state.leader_present_fires,
+            follower_heartbeats > 0.0 ? timing_state.suspicions / follower_heartbeats : NaN,
+            timing_state.leader_crashes,
+            realized_dsr(timing_state),
         )
     end
     return RunResult(

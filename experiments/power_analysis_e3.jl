@@ -1,131 +1,64 @@
 #!/usr/bin/env julia
 
-# E3 Power Analysis & Sample Size Determination
+# E3 pilot power analysis — PROPOSED revision of the sample-size procedure in
+# docs/PRE_REGISTRATION_E3.md §9. The preregistered formula is superseded only
+# if a new preregistration addendum adopts this procedure.
 #
-# Implements the pre-registered sample size procedure from docs/PRE_REGISTRATION_E3.md §9:
-# N = ceil(2 * (z_0.975 + z_0.80)^2 * sigma^2 / (ln 0.85)^2),
-# rounded up to a multiple of 10, capped at 120.
+# Procedure (implemented in experiments/lib/e3_stats.jl, `power_analysis`):
+#  1. best-arrival among B3/B4/B5 on the pilot (a tuning-seed dataset);
+#  2. per cell and treatment, paired differences d = r_B − r_T of per-replica
+#     false-suspicion rates (both runs completed), σ_d = SD(d); SD of the ratio
+#     estimand 1 − mean_T/mean_B by paired bootstrap;
+#  3. N = (z_{1−α/2} + z_{power})² σ_d² / Δ² with Δ = 0.15·mean_B;
+#  4. achieved power at N = 120 (the frozen cap) per cell;
+#  5. no smoothing constants, no floors; mean_B = 0 → "no events: effect undefined".
 #
-# Usage: julia --project=. experiments/power_analysis_e3.jl results/e3/<pilot-dir>/runs.tsv
+# Usage:
+#   julia --project=. experiments/power_analysis_e3.jl <pilot runs.tsv> [--seeds a:b]
+#       [--n-target 120] [--resamples 10000] [--rng-seed 227] [--out power.md]
 
-using Printf
-using Statistics
+include(joinpath(@__DIR__, "lib", "e3_stats.jl"))
+using .E3Stats
 
-struct PilotRow
-    cell::String
-    arm::String
-    seed::Int
-    rate::Float64
-    p95::Float64
-    committed::Int
-end
-
-function parse_pilot_tsv(path::AbstractString)
-    isfile(path) || throw(ArgumentError("file not found: $path"))
-    rows = PilotRow[]
-    for (index, line) in enumerate(eachline(path))
-        index == 1 && continue
-        fields = split(line, '\t')
-        length(fields) >= 22 || continue
-        seed = tryparse(Int, fields[11])
-        isnothing(seed) && continue
-        rate = tryparse(Float64, fields[16])
-        p95 = tryparse(Float64, fields[22])
-        committed = tryparse(Int, fields[18])
-        push!(rows, PilotRow(
-            fields[1],
-            fields[8],
-            seed,
-            isnothing(rate) ? NaN : rate,
-            isnothing(p95) ? NaN : p95,
-            isnothing(committed) ? 0 : committed,
-        ))
-    end
-    return rows
-end
-
-function compute_sample_size(sigma::Float64; delta::Float64=0.15, alpha::Float64=0.05, power::Float64=0.80)
-    z_alpha = 1.959963984540054  # z_0.975
-    z_beta = 0.8416212335729143   # z_0.80
-    effect = abs(log(1.0 - delta)) # ln(0.85)
-    raw_n = 2.0 * (z_alpha + z_beta)^2 * (sigma^2) / (effect^2)
-    # Round up to multiple of 10, capped at 120 (per preregistration §9)
-    rounded = ceil(Int, raw_n / 10.0) * 10
-    clamped = clamp(max(rounded, 10), 10, 120)
-    return (raw_n, clamped)
-end
+const USAGE = "usage: julia --project=. experiments/power_analysis_e3.jl <pilot runs.tsv> [--seeds a:b] [--n-target 120] [--resamples N] [--rng-seed N] [--out file.md]"
 
 function main(arguments)
-    isempty(arguments) && (println(stderr, "usage: julia --project=. experiments/power_analysis_e3.jl runs.tsv"); return 2)
+    (isempty(arguments) || arguments[1] in ("-h", "--help")) && (println(stderr, USAGE); return 2)
     path = arguments[1]
-    rows = parse_pilot_tsv(path)
-    println("Loaded ", length(rows), " pilot runs from: ", path)
-
-    # Group by cell and seed
-    by_cell_seed = Dict{String,Dict{Int,Dict{String,PilotRow}}}()
-    for row in rows
-        cells = get!(by_cell_seed, row.cell, Dict{Int,Dict{String,PilotRow}}())
-        arms = get!(cells, row.seed, Dict{String,PilotRow}())
-        arms[row.arm] = row
+    opts = Dict{String,String}()
+    rest = arguments[2:end]
+    isodd(length(rest)) && (println(stderr, "error: every flag needs a value\n", USAGE); return 2)
+    for i in 1:2:length(rest)
+        k = rest[i]
+        k in ("--seeds", "--n-target", "--resamples", "--rng-seed", "--out") ||
+            (println(stderr, "error: unknown flag $k\n", USAGE); return 2)
+        opts[k[3:end]] = rest[i+1]
     end
-
-    println()
-    println("# Pre-Registration Addendum r3: Pilot Power Analysis & Sample Size Freeze")
-    println()
-    println("Pre-registered specification: 80% power at \$\\delta = 15\\%\$ (\$\\alpha = 0.05\$, two-sided):")
-    println("\$\$N = \\left\\lceil \\frac{2 (z_{0.975} + z_{0.80})^2 \\sigma^2}{(\\ln 0.85)^2} \\right\\rceil\$\$")
-    println()
-    println("| Cell ID | Replicas | Treatment Arm | Baseline Arm | \$\\sigma_{\\ln \\text{ratio}}\$ | Raw \$N\$ | Frozen \$N\$ |")
-    println("|---|---|---|---|---|---|---|")
-
-    max_n = 0
-    smoothing = 1e-4
-
-    for (cell, seeds_map) in sort(collect(by_cell_seed); by=first)
-        treatment = "P2"
-        # Find best arrival baseline (lowest mean rate across these seeds)
-        arrival_arms = ["B4", "B5"]
-        best_arrival = "B4"
-        best_mean = Inf
-        for a in arrival_arms
-            rates = [s[a].rate for s in values(seeds_map) if haskey(s, a) && !isnan(s[a].rate)]
-            if !isempty(rates)
-                m = mean(rates)
-                if m < best_mean
-                    best_mean = m
-                    best_arrival = a
-                end
-            end
+    try
+        seeds = haskey(opts, "seeds") ? parse_seed_range(opts["seeds"]) : nothing
+        table = load_runs(path; seeds=seeds)
+        bad = [r for r in table.rows if r.safety_ok === false]
+        isempty(bad) || (println(stderr, "error: $(length(bad)) pilot rows have safety_ok = false; prereg §11 halt"); return 3)
+        report_like = [r for r in table.rows if r.seed in 201:700 || (!ismissing(r.role) && r.role == "report")]
+        isempty(report_like) ||
+            (println(stderr, "error: input contains $(length(report_like)) report-range/report-role rows; the pilot must be tuning data only"); return 2)
+        pa = power_analysis(table.rows;
+                            n_target=parse(Int, get(opts, "n-target", "120")),
+                            resamples=parse(Int, get(opts, "resamples", "10000")),
+                            rng_seed=parse(Int, get(opts, "rng-seed", "227")))
+        text = render_power(pa; source=path, seeds=haskey(opts, "seeds") ? opts["seeds"] : "all in file")
+        if haskey(opts, "out")
+            mkpath(dirname(abspath(opts["out"])))
+            write(opts["out"], text)
+            println(stderr, "wrote ", opts["out"])
         end
-
-        log_ratios = Float64[]
-        for (seed, arms) in seeds_map
-            (haskey(arms, treatment) && haskey(arms, best_arrival)) || continue
-            r_treat = arms[treatment].rate
-            r_base = arms[best_arrival].rate
-            (isnan(r_treat) || isnan(r_base)) && continue
-            push!(log_ratios, log((r_treat + smoothing) / (r_base + smoothing)))
-        end
-
-        if length(log_ratios) >= 3
-            cell_sigma = std(log_ratios)
-            raw_n, frozen_n = compute_sample_size(cell_sigma)
-            max_n = max(max_n, frozen_n)
-            @printf("| `%s` | %d | %s | %s | %.4f | %.1f | **%d** |\n",
-                cell, length(log_ratios), treatment, best_arrival, cell_sigma, raw_n, frozen_n)
-        else
-            @printf("| `%s` | %d | %s | %s | N/A | N/A | (insufficient data) |\n",
-                cell, length(log_ratios), treatment, best_arrival)
-        end
+        print(text)
+        return 0
+    catch err
+        err isa ArgumentError || rethrow()
+        println(stderr, "error: ", err.msg)
+        return 2
     end
-
-    overall_n = max(max_n, 40)
-    println()
-    println("### Authoritative Sample Size Determination")
-    println("- Maximum calculated \$N\$ across representative cells: **$(overall_n)**")
-    println("- **Frozen Report Replications per Cell**: `N = $(overall_n)`")
-    println()
-    return 0
 end
 
 exit(main(ARGS))

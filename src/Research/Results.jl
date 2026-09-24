@@ -7,7 +7,22 @@ struct SafetyOracleFlags
     violations::Vector{String}
 end
 
-"""E3 adaptation telemetry; `nothing` when no timing arm is active."""
+"""
+E3 adaptation telemetry; `nothing` when no timing arm is active.
+
+Counts cover the measurement window only (see `RunTimingState`).
+- `false_suspicion_rate` = suspicions / election_fires (prereg §3 literal;
+  `NaN` when no fire occurred).
+- `leader_present_fires`: fires while exactly one leader was alive.
+- `suspicions_per_follower_heartbeat`: suspicions per follower-heartbeat of
+  leader presence, i.e. suspicions / (leader_time · (n − 1) / heartbeat); an
+  opportunity-normalized mistake rate that cannot be diluted by leaderless
+  election churn (`NaN` when no leader was present).
+- `leader_crashes`: exogenous crashes that hit the sole active leader;
+  each is either resolved (a delay in `detection_delays_proper`) or censored.
+- `dsr_measured`: median realized leader→follower receiver-proper
+  inter-arrival / source-proper emission interval (`NaN` without samples).
+"""
 struct AdaptationDiagnostics
     arm::Symbol
     information_level::Int
@@ -18,6 +33,10 @@ struct AdaptationDiagnostics
     detection_delays_proper::Vector{Float64}
     censored_detections::Int
     metadata_bytes_sent::Int
+    leader_present_fires::Int
+    suspicions_per_follower_heartbeat::Float64
+    leader_crashes::Int
+    dsr_measured::Float64
 end
 
 """Per-operation observation; pending requests are explicitly right-censored."""

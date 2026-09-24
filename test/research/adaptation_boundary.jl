@@ -18,7 +18,8 @@ end
     @test d.information_level == 2
     @test d.metadata_bytes_sent > 0
     @test d.election_fires >= 1
-    @test 0.0 <= d.false_suspicion_rate <= 1.0
+    @test isnan(d.false_suspicion_rate) || 0.0 <= d.false_suspicion_rate <= 1.0
+    @test d.suspicions <= d.leader_present_fires <= d.election_fires
     @test d.timing_fingerprint == timing_fingerprint(spec)
 end
 

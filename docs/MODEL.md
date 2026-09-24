@@ -214,14 +214,38 @@ velocity-to-`c` ratios avoid avoidable overflow and underflow. The dimensionful
 represented, while the dimensionless classification remains usable.
 
 Every light-cone return, including analytic and coincident paths, is validated
-against the unsquared equation and `R_null`. The light solver controls the
-unsquared equation with a relative tolerance and an optional absolute spatial
-tolerance. Bracket endpoints that become adjacent floating-point values are
-accepted only if one independently passes both residual checks. Defaults are
-based on the numeric type's precision. Research configurations must record any
-non-default tolerance. A bracketed result that misses its contract raises
-`LightConeConvergenceError`; representability or forward-conditioning failures
-raise `NumericalConditioningError`.
+against the unsquared equation `E = |‖x_r - x_e‖ - c (t_r - t_e)|` and
+`R_null`. The contract is
+
+```text
+E ≤ atol + rtol · max(‖Δx‖, cΔt) + floor,
+floor = 2 ε (c · max(|t_e|, |t_r|) + max(‖x_e‖, ‖x_r‖)),   ε = eps(T),
+R_null ≤ max(4 rtol, 4 (atol + floor) / max(‖Δx‖, cΔt)).
+```
+
+The `floor` term is the resolution limit of the absolute coordinates: the
+reception time is a floating-point coordinate, so the true root is only
+representable to `ulp(t_r)/2`, and differences of absolute coordinates round
+at the magnitude of the coordinates rather than of the separation. Without it,
+a short hop at a larger epoch (for example `‖Δx‖ ≈ 1.7e-5` at `t ≈ 0.64`) has
+`rtol · scale` below one coordinate ULP and even the exactly rounded root is
+rejected. The floor is a small multiple of the coordinate ULP and is
+negligible against `rtol · scale` unless the separation is tiny relative to the
+epoch. Defaults are `rtol = 512 ε`, `atol = 0`; research configurations must
+record any non-default tolerance.
+
+The non-inertial solver is a safeguarded bracketed Newton iteration over
+*representable reception times* (not over delays, which at a large epoch map
+many-to-one onto reception times and can make Newton cycle between two
+adjacent reception times). Newton always steps from the best iterate; a
+Newton step that halves neither the bracket nor the best residual forces a
+bisection. Iteration stops at the strict target `atol + rtol · scale`, or
+when the bracket collapses to adjacent representable reception times; then the
+later (causal) endpoint is returned if it meets the floor-aware contract, else
+the earlier one, else `NumericalConditioningError` is raised. A bracketed
+result that misses its contract raises `LightConeConvergenceError`;
+representability or forward-conditioning failures raise
+`NumericalConditioningError`.
 
 Lorentz factors share the same scale-safe beta calculation as worldline
 validation and proper clocks. Boosts use stable `gamma - 1` evaluation,

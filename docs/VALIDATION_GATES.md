@@ -6,6 +6,24 @@ Status of the predeclared validation gates from
 status. A gate is reopened by any change to the code or models its evidence
 covers.
 
+**2026-09-23 — V0/V1 reopened.** 909 of 11,880 E3 pilot runs aborted with
+`LightConeConvergenceError` (a sub-ulp acceptance tolerance on the unsquared
+light equation, and iteration exhaustion on trajectory-change worldlines);
+see `DEVIATIONS.md` D-09. The unit-level evidence below remains valid for
+the cases it covers, but the gates did not cover the E3 operating regime.
+They are re-closed only when the solver fix, its regression tests, and a
+full-grid sweep with zero solver failures are recorded here.
+
+Evidence recorded 2026-09-24 (awaiting the gate owner's review before the
+gates are marked re-closed): scale-aware light-equation acceptance floor and
+ULP-aware safeguarded Newton in `src/Physics/LightCone.jl` with BigFloat-
+oracle regressions for both captured failures
+(`test/physics/light_cone_regressions.jl`); declared worldline kinks for
+proper-time quadrature (`test/physics/worldline_kinks.jl`); old E3 grid,
+55 cells × 9 arms × seeds 1–3: 120 → 3 failures (the 3 were the undeclared
+kink, since fixed); new r4-draft E3 grid, 48 cells × 10 arms × seeds 1–2:
+960/960 runs completed, 0 failed.
+
 | Gate | Definition | Status | Evidence |
 |---|---|---|---|
 | V0 | Analytic radial/transverse/coincident/stationary light-time cases within predeclared tolerances | **PASS** | `test/physics/light_cone.jl`, `test/physics/numerical_regressions.jl` |

@@ -94,6 +94,7 @@ struct ParametricWorldline{T<:AbstractFloat,P,V} <: AbstractWorldline{T}
     tmin::T
     tmax::T
     consistency::Symbol
+    kinks::Vector{T}
 
     function ParametricWorldline{T,P,V}(
         position_function::P,
@@ -102,6 +103,7 @@ struct ParametricWorldline{T<:AbstractFloat,P,V} <: AbstractWorldline{T}
         tmin::T,
         tmax::T,
         consistency::Symbol,
+        kinks::Vector{T}=T[],
     ) where {T<:AbstractFloat,P,V}
         isnan(tmin) && throw(ArgumentError("worldline lower coordinate bound cannot be NaN"))
         isnan(tmax) && throw(ArgumentError("worldline upper coordinate bound cannot be NaN"))
@@ -109,7 +111,13 @@ struct ParametricWorldline{T<:AbstractFloat,P,V} <: AbstractWorldline{T}
         consistency in (:assumed, :audited) ||
             throw(ArgumentError("consistency must be :assumed or :audited"))
         MinkowskiSpacetime{T}(c)
-        return new{T,P,V}(position_function, velocity_function, c, tmin, tmax, consistency)
+        all(isfinite, kinks) || throw(ArgumentError("worldline kink times must be finite"))
+        all(k -> tmin < k < tmax, kinks) ||
+            throw(ArgumentError("worldline kink times must lie strictly inside the domain"))
+        return new{T,P,V}(
+            position_function, velocity_function, c, tmin, tmax, consistency,
+            sort!(unique(kinks)),
+        )
     end
 end
 
@@ -124,6 +132,7 @@ function ParametricWorldline(
     audit_times=nothing,
     audit_rtol::Real=sqrt(eps(T)),
     audit_atol::Real=zero(T),
+    kinks=(),
 ) where {T<:AbstractFloat,P,V}
     worldline = ParametricWorldline{T,P,V}(
         position_function,
@@ -132,6 +141,7 @@ function ParametricWorldline(
         T(tmin),
         T(tmax),
         consistency,
+        T[T(k) for k in kinks],
     )
     if validate_at !== nothing
         position_at(worldline, T(validate_at))
@@ -200,6 +210,17 @@ end
 @inline coordinate_domain(::InertialWorldline{T}) where {T} = (-T(Inf), T(Inf))
 @inline coordinate_domain(worldline::ParametricWorldline) = (worldline.tmin, worldline.tmax)
 @inline coordinate_domain(::UniformlyAcceleratedWorldline{T}) where {T} = (-T(Inf), T(Inf))
+
+"""
+    worldline_kinks(worldline)
+
+Coordinate times at which the worldline's velocity (hence the proper-time
+rate) is not smooth, declared by the constructor. Proper-time integration and
+inversion split quadrature panels at these times by default, because an
+adaptive Gauss-Kronrod error estimate can miss a kink inside a panel.
+"""
+worldline_kinks(::AbstractWorldline{T}) where {T} = T[]
+worldline_kinks(worldline::ParametricWorldline) = worldline.kinks
 
 @inline reference_coordinate_time(worldline::InertialWorldline) = worldline.origin.t
 @inline reference_coordinate_time(worldline::UniformlyAcceleratedWorldline) = worldline.origin.t

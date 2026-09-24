@@ -144,5 +144,6 @@ end
 include("metamorphic.jl")
 include("adaptation_boundary.jl")
 include("causal_bounds.jl")
+include("e3_design.jl")
 
 end

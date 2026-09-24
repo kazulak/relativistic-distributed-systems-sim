@@ -87,13 +87,84 @@ function _representable_reception_time(emission_time::T, requested_delay::T) whe
     return reception_time, actual_delay
 end
 
+"""
+    _light_equation_floor(spacetime, emission, reception_time, reception_position)
+
+Absolute resolution floor for the unsquared light equation
+`E = |‖x_r - x_e‖ - c (t_r - t_e)|`:
+
+    floor = 2 ε (c max(|t_e|, |t_r|) + max(‖x_e‖, ‖x_r‖)),      ε = eps(T).
+
+Rationale: `t_r` is a floating-point coordinate, so the true root can only be
+represented to within `ulp(t_r)/2 ≤ ε|t_r|/2`, which alone moves `E` by up to
+`(c + |v|) ε|t_r|/2 ≤ c ε|t_r|`. Forming `t_r - t_e` and `x_r - x_e` and
+evaluating `x_r` each round at the magnitude of the *absolute* coordinates, not
+of the (possibly much smaller) separation, adding O(ε) times `c|t|` and `‖x‖`.
+The factor 2 covers these terms. The floor is therefore a small multiple of the
+ULP of the compared coordinates, is independent of `rtol`, and is negligible
+against `rtol * scale` whenever the separation is not tiny relative to the
+coordinate epoch.
+"""
+function _light_equation_floor(
+    spacetime::MinkowskiSpacetime{T},
+    emission::SpacetimeEvent{T},
+    reception_time::T,
+    reception_position::SVector{3,T},
+) where {T<:AbstractFloat}
+    unit = T(2) * eps(T)
+    floor = (unit * spacetime.c) * max(abs(emission.t), abs(reception_time)) +
+            unit * max(_spatial_norm(emission.x), _spatial_norm(reception_position))
+    isfinite(floor) ||
+        throw(NumericalConditioningError("light-cone resolution floor is not representable"))
+    return floor
+end
+
+"""
+Contract tolerance for the unsquared light equation:
+`atol + rtol * scale + floor`, with `scale = max(‖Δx‖, cΔt)` and `floor`
+from `_light_equation_floor`. Every returned intersection must meet it
+(`_validated_intersection`).
+"""
+@inline _light_equation_tolerance(rtol::T, atol::T, scale::T, floor::T) where {T<:AbstractFloat} =
+    atol + rtol * scale + floor
+
+# Solver stopping test: the strict `max(atol, rtol * scale)` target, without the
+# floor, so iteration continues while the root is still resolvable. The
+# floor is only admitted once the bracket has collapsed to adjacent
+# representable reception times (see `_light_state_within_contract`).
+@inline _light_state_converged(state, rtol, atol) =
+    abs(state.value) <= atol || abs(state.value) <= rtol * state.scale
+
+@inline _light_state_within_contract(state, rtol, atol) =
+    abs(state.value) <= _light_equation_tolerance(rtol, atol, state.scale, state.floor)
+
 function _light_state_for_delay(
     spacetime::MinkowskiSpacetime{T},
     emission::SpacetimeEvent{T},
     receiver::AbstractWorldline{T},
     requested_delay::T,
 ) where {T<:AbstractFloat}
-    reception_time, actual_delay = _representable_reception_time(emission.t, requested_delay)
+    reception_time, _ = _representable_reception_time(emission.t, requested_delay)
+    return _light_state_at_time(spacetime, emission, receiver, reception_time)
+end
+
+# Light-equation state at a representable reception coordinate time. The root
+# search brackets reception times directly, because distinct delays can map to
+# the same representable reception time at a large emission epoch.
+function _light_state_at_time(
+    spacetime::MinkowskiSpacetime{T},
+    emission::SpacetimeEvent{T},
+    receiver::AbstractWorldline{T},
+    reception_time::T,
+) where {T<:AbstractFloat}
+    isfinite(reception_time) ||
+        throw(NumericalConditioningError("reception coordinate time overflowed"))
+    reception_time > emission.t || throw(
+        NumericalConditioningError("reception coordinate time is not after the emission epoch"),
+    )
+    actual_delay = reception_time - emission.t
+    actual_delay > zero(T) ||
+        throw(NumericalConditioningError("reception delay subtraction lost its positive increment"))
     receiver_position = position_at(receiver, reception_time)
     receiver_velocity = coordinate_velocity(receiver, reception_time)
     separation = receiver_position - emission.x
@@ -115,11 +186,14 @@ function _light_state_for_delay(
     )
     scale = max(distance, light_distance)
     equation_residual = scale == zero(T) ? zero(T) : abs(value) / scale
+    floor = _light_equation_floor(spacetime, emission, reception_time, receiver_position)
     return (
         value=value,
         derivative=derivative,
         distance=distance,
         light_distance=light_distance,
+        scale=scale,
+        floor=floor,
         equation_residual=equation_residual,
         reception_time=reception_time,
         actual_delay=actual_delay,
@@ -161,9 +235,12 @@ function _validated_intersection(
     equation_scale > zero(T) ||
         throw(NumericalConditioningError("light-cone equation scale collapsed to zero"))
     equation_residual = unsquared_error / equation_scale
-    equation_tolerance = atol + rtol * equation_scale
+    floor = _light_equation_floor(spacetime, emission, reception.t, reception.x)
+    equation_tolerance = _light_equation_tolerance(rtol, atol, equation_scale, floor)
     interval_residual = scaled_interval_residual(spacetime, emission, reception)
-    interval_tolerance = max(T(4) * rtol, T(4) * atol / equation_scale)
+    # R_null <= 2E / max(‖Δx‖, cΔt) near the null cone, so the interval check
+    # inherits the unsquared contract with a factor-4 allowance.
+    interval_tolerance = max(T(4) * rtol, T(4) * (atol + floor) / equation_scale)
     unsquared_error <= equation_tolerance || throw(
         LightConeConvergenceError(
             "unsquared light equation misses tolerance: error=$unsquared_error tolerance=$equation_tolerance",
@@ -383,8 +460,8 @@ function light_cone_intersection(
     high_state = _light_state_for_delay(spacetime, emission, receiver, step)
     high = high_state.actual_delay
     expansions = 0
-    while high_state.value > absolute_tolerance &&
-          high_state.equation_residual > relative_tolerance
+    while high_state.value > zero(T) &&
+          !_light_state_converged(high_state, relative_tolerance, absolute_tolerance)
         if finite_horizon && high_state.reception_time == horizon
             throw(
                 NoFutureLightConeIntersection(
@@ -408,8 +485,7 @@ function light_cone_intersection(
         high_state = _light_state_for_delay(spacetime, emission, receiver, step)
         high = high_state.actual_delay
     end
-    if high_state.equation_residual <= relative_tolerance ||
-       abs(high_state.value) <= absolute_tolerance
+    if _light_state_converged(high_state, relative_tolerance, absolute_tolerance)
         return _validated_intersection(
             spacetime,
             emission,
@@ -423,13 +499,32 @@ function light_cone_intersection(
         )
     end
 
-    low = zero(T)
-    current = min(initial_distance / (-initial_derivative), high)
-    current = max(current, minimum_delay)
+    # Safeguarded bracketed Newton over *representable reception times*.
+    # Invariant: f(low_time) > 0 (receiver outside the light cone, or the
+    # emission epoch itself) and f(high_time) < 0. Newton steps from the best
+    # iterate and is used only when it lands strictly inside the bracket; a
+    # Newton step that halves neither the bracket nor |f_best| forces a
+    # bisection. The loop ends when a state meets the strict target
+    # `max(atol, rtol * scale)`, or when the bracket collapses to adjacent
+    # floating-point reception times, whose endpoints are then checked against
+    # the floor-aware contract.
+    #
+    # Bracketing in reception time rather than in delay is essential: at a
+    # large emission epoch many distinct delays round to the same reception
+    # time, so a delay-space bracket can stay "open" while every probe snaps to
+    # the same two adjacent reception times (a Newton 2-cycle that previously
+    # exhausted max_iterations).
+    low_time = emission.t
+    high_time = high_state.reception_time
+    seed_delay = max(min(initial_distance / (-initial_derivative), high), minimum_delay)
+    current_time, _ = _representable_reception_time(emission.t, seed_delay)
+    current_time = min(current_time, high_time)
     used_bisection = false
+    last_step_newton = true
+    best_state = nothing
     for iteration in 1:Int(max_iterations)
-        state = _light_state_for_delay(spacetime, emission, receiver, current)
-        if state.equation_residual <= relative_tolerance || abs(state.value) <= absolute_tolerance
+        state = _light_state_at_time(spacetime, emission, receiver, current_time)
+        if _light_state_converged(state, relative_tolerance, absolute_tolerance)
             return _validated_intersection(
                 spacetime,
                 emission,
@@ -442,48 +537,79 @@ function light_cone_intersection(
                 absolute_tolerance,
             )
         end
+        previous_width = high_time - low_time
+        previous_best_value = best_state === nothing ? T(Inf) : abs(best_state.value)
         if state.value > zero(T)
-            low = state.actual_delay
+            low_time = max(low_time, state.reception_time)
         else
-            high = state.actual_delay
+            high_time = min(high_time, state.reception_time)
         end
-        midpoint = low + (high - low) / T(2)
-        if midpoint == low || midpoint == high
-            for adjacent_delay in (low, high)
-                adjacent_delay > zero(T) || continue
-                adjacent_state = _light_state_for_delay(
-                    spacetime,
-                    emission,
-                    receiver,
-                    adjacent_delay,
-                )
-                if adjacent_state.equation_residual <= relative_tolerance ||
-                   abs(adjacent_state.value) <= absolute_tolerance
-                    return _validated_intersection(
-                        spacetime,
-                        emission,
-                        receiver,
-                        adjacent_state.reception_time,
-                        initial_distance,
-                        iteration,
-                        :bisection,
-                        relative_tolerance,
-                        absolute_tolerance,
-                    )
+        low_time < high_time || throw(
+            LightConeConvergenceError("light-cone bracket lost its sign change"),
+        )
+        if best_state === nothing || abs(state.value) < abs(best_state.value)
+            best_state = state
+        end
+        if nextfloat(low_time) >= high_time
+            # The root is not representable more finely. Prefer the later
+            # (causal, f <= 0) endpoint so a delivery is never placed outside
+            # the future light cone; fall back to the earlier one. Either must
+            # meet the floor-aware contract.
+            adjacent_best = nothing
+            for endpoint in (high_time, low_time)
+                endpoint > emission.t || continue
+                endpoint_state = _light_state_at_time(spacetime, emission, receiver, endpoint)
+                if _light_state_within_contract(endpoint_state, relative_tolerance, absolute_tolerance)
+                    adjacent_best = endpoint_state
+                    break
                 end
             end
-            throw(
+            adjacent_best === nothing && throw(
                 NumericalConditioningError(
-                    "adjacent representable delays do not satisfy the light-cone tolerance",
+                    "adjacent representable reception times do not satisfy the light-cone tolerance",
                 ),
             )
+            return _validated_intersection(
+                spacetime,
+                emission,
+                receiver,
+                adjacent_best.reception_time,
+                initial_distance,
+                iteration,
+                :bisection,
+                relative_tolerance,
+                absolute_tolerance,
+            )
         end
-        newton = state.actual_delay - state.value / state.derivative
-        if isfinite(newton) && low < newton < high
-            current = newton
+        width = high_time - low_time
+        midpoint = low_time + width / T(2)
+        if !(low_time < midpoint < high_time)
+            midpoint = nextfloat(low_time)
+        end
+        # Newton always steps from the best iterate so far (smallest |f|, an
+        # endpoint of the bracket), so interleaved bisections never discard
+        # Newton progress. A Newton step that halved neither the bracket nor
+        # |f_best| forces the next step to bisect; this keeps the search
+        # robust where Newton is poor (near-kinks such as the C^1
+        # trajectory-change onset, or noise-dominated residuals).
+        stalled = last_step_newton && width > previous_width / T(2) &&
+                  abs(best_state.value) > previous_best_value / T(2)
+        newton_time = best_state.reception_time - best_state.value / best_state.derivative
+        if isfinite(newton_time) && !(low_time < newton_time < high_time) &&
+           abs(newton_time - best_state.reception_time) <= T(2) * eps(best_state.reception_time)
+            # Newton has resolved the root to the ULP of the reception
+            # coordinate: probe the neighbouring representable time towards
+            # the opposite endpoint, which collapses the bracket directly.
+            newton_time = best_state.reception_time == low_time ? nextfloat(low_time) :
+                          prevfloat(high_time)
+        end
+        if !stalled && isfinite(newton_time) && low_time < newton_time < high_time
+            current_time = newton_time
+            last_step_newton = true
         else
-            current = midpoint
+            current_time = midpoint
             used_bisection = true
+            last_step_newton = false
         end
     end
     throw(LightConeConvergenceError("light-cone root exhausted max_iterations"))

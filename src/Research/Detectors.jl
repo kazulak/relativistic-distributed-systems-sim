@@ -5,6 +5,10 @@ Arms observe heartbeat arrivals in receiver proper time and produce an
 election-deadline band as proper-time offsets from now. No arm touches Raft
 transitions; the engine applies bands only at the scheduler boundary,
 preserving the C1 safety-refinement argument.
+
+`O0` is the geometry oracle: the engine computes its band from the true
+worldlines (predicted arrival of the leader's next heartbeats). It is an upper
+reference and must be excluded from rankings.
 """
 
 struct TimingBudget
@@ -20,9 +24,19 @@ struct TimingBudget
     end
 end
 
-const TIMING_ARMS = (:B0, :B1, :B2, :B3, :B4, :B5, :P1, :P2, :P3)
+const TIMING_ARMS = (:B0, :B1, :B2, :B3, :B4, :B5, :P1, :P2, :P3, :O0)
 
-"""Frozen specification of one timing arm for a run."""
+"""Arms that are reference-only and must never enter a ranking."""
+const REFERENCE_ARMS = (:O0,)
+
+"""
+Frozen specification of one timing arm for a run.
+
+`ewma_alpha` is the log-interval EWMA gain used by B3/B5/P1–P3.
+`miss_tolerance` scales the predicted inter-arrival band of the adaptive arms
+(B3, B4, P1–P3) and is the number of heartbeat intervals the O0 oracle waits
+past the leader's latest emission; 1.0 reproduces the r2/r3 behaviour.
+"""
 struct TimingSpec
     arm::Symbol
     level::Int
@@ -37,6 +51,8 @@ struct TimingSpec
     band_z_high::Float64
     warmup_observations::Int
     reset_on_crash::Bool
+    ewma_alpha::Float64
+    miss_tolerance::Float64
 
     function TimingSpec(;
         arm::Symbol=:B0,
@@ -52,12 +68,14 @@ struct TimingSpec
         band_z_high::Real=2.326,
         warmup_observations::Integer=3,
         reset_on_crash::Bool=true,
+        ewma_alpha::Real=0.25,
+        miss_tolerance::Real=1.0,
     )
         arm in TIMING_ARMS ||
             throw(ArgumentError("unknown timing arm $arm; expected one of $TIMING_ARMS"))
         level in 0:3 || throw(ArgumentError("information level must be in 0:3"))
-        (arm == :B0 || arm == :B1) && level != 0 &&
-            throw(ArgumentError("static arms use level 0"))
+        (arm == :B0 || arm == :B1 || arm == :O0) && level != 0 &&
+            throw(ArgumentError("static and oracle arms use level 0"))
         arm in (:P1, :P2, :P3) && level < 1 &&
             throw(ArgumentError("PT-FD arms require metadata level >= 1"))
         Float64(base_timeout) > 0.0 ||
@@ -72,6 +90,10 @@ struct TimingSpec
             throw(ArgumentError("phi threshold must be positive"))
         0.0 <= Float64(band_z_low) < Float64(band_z_high) ||
             throw(ArgumentError("band z-values must satisfy 0 <= low < high"))
+        0.0 < Float64(ewma_alpha) <= 1.0 ||
+            throw(ArgumentError("ewma_alpha must lie in (0, 1]"))
+        isfinite(Float64(miss_tolerance)) && Float64(miss_tolerance) >= 1.0 ||
+            throw(ArgumentError("miss_tolerance must be finite and >= 1"))
         return new(
             arm,
             Int(level),
@@ -86,17 +108,30 @@ struct TimingSpec
             Float64(band_z_high),
             Int(warmup_observations),
             Bool(reset_on_crash),
+            Float64(ewma_alpha),
+            Float64(miss_tolerance),
         )
     end
 end
 
+"""Copy `spec` with selected keyword fields replaced."""
+function with_timing(spec::TimingSpec; kwargs...)
+    fields = Dict{Symbol,Any}(name => getfield(spec, name) for name in fieldnames(TimingSpec))
+    for (key, value) in kwargs
+        haskey(fields, key) || throw(ArgumentError("unknown TimingSpec field $key"))
+        fields[key] = value
+    end
+    return TimingSpec(; fields...)
+end
+
 function timing_fingerprint(spec::TimingSpec)
     value = UInt64(0xcbf29ce484222325)
-    text = "e3-timing-v1|$(spec.arm)|$(spec.level)|$(spec.budget.minimum)|" *
+    text = "e3-timing-v2|$(spec.arm)|$(spec.level)|$(spec.budget.minimum)|" *
            "$(spec.budget.maximum)|$(spec.base_timeout)|$(spec.backoff_factor)|" *
            "$(spec.window_capacity)|$(spec.quantile_low)|$(spec.quantile_high)|" *
            "$(spec.phi_threshold)|$(spec.band_z_low)|$(spec.band_z_high)|" *
-           "$(spec.warmup_observations)|$(spec.reset_on_crash)"
+           "$(spec.warmup_observations)|$(spec.reset_on_crash)|" *
+           "$(spec.ewma_alpha)|$(spec.miss_tolerance)"
     for byte in codeunits(text)
         value = xor(value, UInt64(byte))
         value *= UInt64(0x00000100000001b3)
@@ -134,7 +169,15 @@ ArmRuntime(spec::TimingSpec) = ArmRuntime(
     0.0,
 )
 
-"""Per-run adaptation bookkeeping owned by the engine."""
+"""
+Per-run adaptation bookkeeping owned by the engine.
+
+Accounting window: election fires, suspicions and D_sr samples are counted
+only while the scheduler's coordinate time lies inside the measurement window
+`[measurement_start, measurement_end]`; crash-detection delays are recorded
+for every exogenous crash of the sole active leader and are right-censored at
+the censor horizon.
+"""
 mutable struct RunTimingState
     spec::TimingSpec
     runtimes::Dict{Int,ArmRuntime}
@@ -143,11 +186,28 @@ mutable struct RunTimingState
     metadata_bytes_sent::Int
     suspicions::Int
     election_fires::Int
+    leader_present_fires::Int
     detection_delays_proper::Vector{Float64}
     censored_detections::Int
-    open_crashes::Vector{Tuple{Int,Float64}}
+    # (crashed leader id, crash coordinate, crashed leader term)
+    open_crashes::Vector{Tuple{Int,Float64,UInt64}}
+    leader_crashes::Int
+    measurement_start::Float64
+    measurement_end::Float64
+    # Ground truth (never on the wire): message id => (leader, term, τ_emit).
+    truth_emit::Dict{UInt64,Tuple{Int,UInt64,Float64}}
+    # Latest leader emission: leader => (term, τ_emit, emission coordinate).
+    leader_last_emit::Dict{Int,Tuple{UInt64,Float64,Float64}}
+    # Per (leader, follower): (term, τ_emit, τ_arrive) of the last accepted copy.
+    last_heartbeat::Dict{Tuple{Int,Int},Tuple{UInt64,Float64,Float64}}
+    dsr_samples::Vector{Float64}
 
-    function RunTimingState(spec::TimingSpec, members::Vector{Int})
+    function RunTimingState(
+        spec::TimingSpec,
+        members::Vector{Int};
+        measurement_start::Real=-Inf,
+        measurement_end::Real=Inf,
+    )
         runtimes = Dict{Int,ArmRuntime}(id => ArmRuntime(spec) for id in members)
         return new(
             spec,
@@ -157,11 +217,30 @@ mutable struct RunTimingState
             0,
             0,
             0,
+            0,
             Float64[],
             0,
-            Tuple{Int,Float64}[],
+            Tuple{Int,Float64,UInt64}[],
+            0,
+            Float64(measurement_start),
+            Float64(measurement_end),
+            Dict{UInt64,Tuple{Int,UInt64,Float64}}(),
+            Dict{Int,Tuple{UInt64,Float64,Float64}}(),
+            Dict{Tuple{Int,Int},Tuple{UInt64,Float64,Float64}}(),
+            Float64[],
         )
     end
+end
+
+in_measurement_window(state::RunTimingState, coordinate::Float64) =
+    state.measurement_start <= coordinate <= state.measurement_end
+
+"""Median realized leader→follower rate ratio over the measurement window (NaN if none)."""
+function realized_dsr(state::RunTimingState)
+    isempty(state.dsr_samples) && return NaN
+    ordered = sort(state.dsr_samples)
+    m = length(ordered)
+    return isodd(m) ? ordered[(m + 1) ÷ 2] : (ordered[m ÷ 2] + ordered[m ÷ 2 + 1]) / 2
 end
 
 metadata_byte_surcharge(level::Integer) =
@@ -236,7 +315,7 @@ spec_is_gap_aware(spec::TimingSpec) = spec.arm in (:P1, :P2, :P3)
 function _integrate_interval!(runtime::ArmRuntime, spec::TimingSpec, delta::Float64, gap::Int)
     sample = log(delta)
     prior = runtime.log_mean_interval
-    runtime.log_mean_interval += 0.25 * (sample - prior)
+    runtime.log_mean_interval += spec.ewma_alpha * (sample - prior)
     residual = sample - runtime.log_mean_interval
     runtime.log_variance_interval += 0.20 * (residual^2 - runtime.log_variance_interval)
     gap > 0 && (runtime.log_variance_interval += 0.10 * gap)

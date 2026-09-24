@@ -12,6 +12,11 @@ publication-ready evidence. The research questions, validity audit, and
 implementation gates are in
 [the publishable research plan](docs/PUBLISHABLE_RESEARCH_PLAN.md).
 
+**Evidence status (2026-09-23):** no research claim is currently eligible.
+An audit returned C2/C3 to *Target*, withdrew the E3 addendum r3, and blocked
+confirmatory E3 runs pending a new addendum; every finding and its
+consequence is logged in [docs/DEVIATIONS.md](docs/DEVIATIONS.md).
+
 This is a Julia 1.10 simulator for flat-spacetime distributed systems experiments. It contains:
 
 - typed Minkowski events, worldlines, proper clocks, light-cone solvers, and
@@ -58,8 +63,11 @@ relativistic-distributed-systems-sim/
     run_rq1.jl
     analyze_rq1.jl
     run_e3.jl
+    tune_e3.jl
     analyze_e3.jl
     power_analysis_e3.jl
+    check_completion.jl  # CI check of an E3 sweep's completion.json
+    lib/                 # manifests, E3 cells/seeds, E3 statistics
     configs/rq1/
   formal/                # TLA+ models and validation harness inputs
   scripts/               # formal-validation harness entry points
@@ -99,7 +107,7 @@ julia --project=. -e 'import Pkg; Pkg.test()'
 
 `Pkg.test()` is the canonical entry point and imports the installed package.
 For a focused local run, set `RDS_TEST_GROUP` to `physics`, `raft`,
-`research`, `adaptations`, or `differential`:
+`research`, `adaptations`, `differential`, or `experiments`:
 
 ```bash
 RDS_TEST_GROUP=physics julia --project=. test/runtests.jl
@@ -107,6 +115,7 @@ RDS_TEST_GROUP=raft julia --project=. test/runtests.jl
 RDS_TEST_GROUP=research julia --project=. test/runtests.jl
 RDS_TEST_GROUP=adaptations julia --project=. test/runtests.jl
 RDS_TEST_GROUP=differential julia --project=. test/runtests.jl
+RDS_TEST_GROUP=experiments julia --project=. test/runtests.jl
 ```
 
 ## Run an RQ1 Scenario

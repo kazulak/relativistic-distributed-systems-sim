@@ -32,6 +32,7 @@ include("Detectors.jl")
 include("TimingBands.jl")
 include("Results.jl")
 include("Scenarios.jl")
+include("DsrScenarios.jl")
 include("Engine.jl")
 
 export ProperTimeClock,
@@ -49,6 +50,13 @@ export ProperTimeClock,
     DimensionlessParameters,
     canonical_scenario,
     trajectory_change_scenario,
+    dsr_regime_scenario,
+    dsr_pairwise_ratios,
+    nearest_neighbour_rho,
+    HomotheticWorldline,
+    CrashLeader,
+    with_timing,
+    REFERENCE_ARMS,
     rq1_scenarios,
     validate_config,
     dimensionless_parameters,
@@ -76,6 +84,10 @@ export ProperTimeClock,
     trace_records,
     print_run_summary,
     causal_quorum_bound,
+    causal_quorum_chain,
+    causal_bound_tolerance,
+    CAUSAL_BOUND_RTOL,
+    CAUSAL_BOUND_ATOL_FLOOR,
     verify_causal_quorum_bounds
 
 end

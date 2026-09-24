@@ -41,21 +41,33 @@ explicit non-negative seed. Families are:
 
 ### Systematic grid sweeps (Stage E1 & E2)
 
-To address Audit Findings 3 and 7, the runner supports structured Stage E1 (deterministic parameter sweeps across dimensionless $\rho, \theta, \chi, D_{sr}$, run once per cell) and Stage E2 (stochastic disruption sweeps across paired seeds):
+The runner supports Stage E1 (geometry sweeps across dimensionless
+$\rho, \theta, \chi, D_{sr}$) and Stage E2 (disruption sweeps). Raft
+election deadlines are drawn from per-node seeded RNG streams, so **every
+cell is stochastic**, including E1: each cell runs over a seed range and the
+run is the experimental unit (`DEVIATIONS.md` D-05).
 
 ```sh
-# Fast smoke verification sweeps
-julia --project=. experiments/run_rq1.jl --sweep e1-smoke --output-dir results/rq1/smoke_e1
-julia --project=. experiments/run_rq1.jl --sweep e2-smoke --output-dir results/rq1/smoke_e2
+# Smoke sweeps (seeds 1:3)
+julia --project=. experiments/run_rq1.jl --sweep e1-smoke --out results/rq1/smoke_e1
+julia --project=. experiments/run_rq1.jl --sweep e2-smoke --out results/rq1/smoke_e2
 
-# Full confirmatory sweeps
-julia --project=. experiments/run_rq1.jl --sweep e1-full --output-dir results/rq1/full_e1
-julia --project=. experiments/run_rq1.jl --sweep e2-full --output-dir results/rq1/full_e2
+# Exploratory full sweeps (default seeds 1:20)
+julia --project=. experiments/run_rq1.jl --sweep e1-full --out results/rq1/explore_e1
+
+# Confirmatory sweeps: only with an RQ1 preregistration tag, explicit seeds,
+# and a clean git tree; the output directory must not exist.
+julia --project=. experiments/run_rq1.jl --sweep e1-full --seeds A:B     --confirmatory --prereg <tag> --out results/rq1/<run-id>
 ```
 
-Outputs written to the target directory:
-- `manifest.json`: schema `rq1-manifest-v1`, git commit hash, Julia version, timestamp, configuration fingerprints, planned run count.
-- `runs.tsv`: tab-separated run observations with full safety flags, physical causal quorum margin checks, and client proper-time deadline availability.
+Outputs written to the target directory (never appended to or overwritten):
+- `manifest.json`: schema `rq1-manifest-v2`; HEAD commit, dirty flag and
+  diff digest, Julia version, timestamp, role (exploratory/confirmatory),
+  preregistration tag, seeds, and per-cell configuration fingerprints.
+- `runs.tsv`: one row per run with status and failure reason, the four
+  safety-oracle flags, the causal-bound audit (`causal_bound_ok`,
+  `audited_writes`, `min_causal_margin` — `NaN` when no write was audited),
+  and client proper-time deadline availability.
 
 ### Analyzing RQ1 results
 
@@ -65,7 +77,13 @@ Analyze run results and generate a markdown evaluation report:
 julia --project=. experiments/analyze_rq1.jl results/rq1/smoke_e1/runs.tsv
 ```
 
-This verifies 100% safety invariant preservation (H1a), checks that no write commits below the physical causal quorum bound (Claim C3, [docs/CAUSAL_QUORUM_BOUND.md](CAUSAL_QUORUM_BOUND.md)), and tabulates deadline availability degradation over $\chi$ and $D_{sr}$ (H1b).
+The report counts completed/failed runs and safety-flag outcomes (H1a),
+summarizes the causal-bound audit including how many writes were actually
+audited (C3, [CAUSAL_QUORUM_BOUND.md](CAUSAL_QUORUM_BOUND.md)), and tabulates
+per-cell deadline availability with bootstrap intervals over runs plus
+exploratory rank correlations with $\chi$, $D_{sr}$ and $|\beta|$. It is
+descriptive and declares no hypothesis validated; confirmatory H1b/H1c tests
+belong to an RQ1 preregistration.
 
 For programmatic experiments:
 
@@ -80,7 +98,8 @@ config = canonical_scenario(
     theta=(5.0, 7.0),
 )
 result = run_scenario(config; seed=7)
-bound_ok, min_margin, violations = verify_causal_quorum_bounds(config, result.operations)
+audit = verify_causal_quorum_bounds(config, result.operations)
+audit.ok, audit.audited_writes, audit.min_margin  # min_margin is NaN when nothing was audited
 ```
 
 `rq1_scenarios` constructs the complete family set, while
@@ -106,6 +125,15 @@ not introduced merely to add a new root dependency.
   reordering, and jitter are stateless functions of the declared seed and
   message identity. The engine does not read the global RNG, wall clock, or
   Julia's randomized `hash`.
+- Client requests and replies propagate causally: a request reaches its
+  target at the earliest future light-cone intersection from the client's
+  worldline plus the processing delay, and a reply reaches the client the
+  same way from the replying node; both are causality-checked on arrival.
+  Client traffic is not subject to protocol-link loss, jitter, reordering,
+  or queueing. The client addresses the node it believes leads using
+  *global* knowledge of the current leader (oracle routing), then follows
+  leader hints on retry; this is a modeling assumption, not a claim about
+  real clients.
 - Crash, restart, and link faults are absolute, exogenous scenario events.
   Link availability is sampled when a message is transmitted; a later link
   change does not retroactively cancel an already in-flight copy.
@@ -169,9 +197,9 @@ availability metric. Client commit outcomes are the primary service evidence.
   statistical sample size. Confirmatory stochastic experiments still require
   frozen tuning/report seeds, power justification, paired analysis, and
   uncertainty intervals.
-- Results remain in memory and the small CLI prints a summary. Immutable raw-run
-  manifests and archival result serialization belong to the later artifact
-  pipeline.
+- `run_scenario` keeps results in memory; the sweep runners write
+  `manifest.json` and `runs.tsv`. `results/` is git-ignored, so runs used as
+  evidence must be archived separately (checksummed) before they are cited.
 - This lane implements standard Raft only. Proper-time-aware detectors,
   redundancy, relays, and leader placement must be separate adaptations and
   must be compared on common exogenous traces.

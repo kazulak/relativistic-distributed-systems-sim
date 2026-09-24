@@ -1,149 +1,111 @@
 #!/usr/bin/env julia
 
-# E3 analysis: paired comparison of PT-FD arms against the best arrival-only
-# arm per preregistered decision rules (docs/PRE_REGISTRATION_E3.md §8).
-# Usage: julia --project=. experiments/analyze_e3.jl results/e3/<run-id>/runs.tsv [--seed-min 201]
+# E3 analysis CLI: preregistered paired comparison of PT-FD arms against the
+# best arrival-only arm (docs/PRE_REGISTRATION_E3.md §2, §5, §7, §8, §11).
+# All statistics live in experiments/lib/e3_stats.jl.
+#
+# Usage:
+#   julia --project=. experiments/analyze_e3.jl \
+#       --tuning <tuning.tsv> [--tuning-seeds a:b] \
+#       --report <report.tsv> [--report-seeds a:b] \
+#       [--status-policy pairwise-exclude|include-failed] \
+#       [--best-arrival-scope global|per-cell] \
+#       [--resamples 10000] [--rng-seed 227] [--ni-min-pairs 10] \
+#       [--out report.md]
+#
+# --tuning is mandatory: best-arrival is selected on tuning traces only and
+# never on report rows. The same file may be given for --tuning and --report
+# if disjoint --tuning-seeds / --report-seeds ranges are given.
+#
+# Exit codes: 0 analysis written; 2 usage/input error; 3 safety halt (§11).
 
-using Random
+include(joinpath(@__DIR__, "lib", "e3_stats.jl"))
+using .E3Stats
 
-struct Row
-    cell::String
-    arm::String
-    seed::Int
-    status::String
-    rate::Float64
-    p95::Float64
-    committed::Int
-end
+const USAGE = """
+usage: julia --project=. experiments/analyze_e3.jl --tuning <tsv> [--tuning-seeds a:b]
+                                                   --report <tsv> [--report-seeds a:b]
+                                                   [--status-policy pairwise-exclude|include-failed]
+                                                   [--best-arrival-scope global|per-cell]
+                                                   [--rate-column false_suspicion_rate|suspicions_per_follower_heartbeat]
+                                                   [--resamples N] [--rng-seed N] [--ni-min-pairs N] [--out file.md]"""
 
-function parse_rows(path::AbstractString, seed_min::Int)
-    rows = Row[]
-    for (index, line) in enumerate(eachline(path))
-        index == 1 && continue
-        fields = split(line, '\t')
-        length(fields) >= 22 || continue
-        seed = tryparse(Int, fields[11])
-        isnothing(seed) && continue
-        seed < seed_min && continue
-        rate = tryparse(Float64, fields[16])
-        p95 = tryparse(Float64, fields[22])
-        committed = tryparse(Int, fields[18])
-        push!(rows, Row(
-            fields[1],
-            fields[8],
-            seed,
-            fields[12],
-            isnothing(rate) ? NaN : rate,
-            isnothing(p95) ? NaN : p95,
-            isnothing(committed) ? 0 : committed,
-        ))
+function parse_args(arguments)
+    opts = Dict{String,String}()
+    i = 1
+    while i <= length(arguments)
+        a = arguments[i]
+        a in ("-h", "--help") && return nothing
+        startswith(a, "--") || throw(ArgumentError("unexpected argument '$a'"))
+        i < length(arguments) || throw(ArgumentError("flag $a needs a value"))
+        opts[a[3:end]] = arguments[i+1]
+        i += 2
     end
-    return rows
-end
-
-function paired_difference(cells_by_key, cell::String, treatment::String, control::String, metric)
-    differences = Float64[]
-    for (seed, arms) in get(cells_by_key, cell, Dict())
-        haskey(arms, treatment) && haskey(arms, control) || continue
-        a = metric(arms[treatment])
-        b = metric(arms[control])
-        isnan(a) || isnan(b) || push!(differences, b - a)
+    known = Set(["tuning", "tuning-seeds", "report", "report-seeds", "status-policy", "best-arrival-scope",
+                 "resamples", "rng-seed", "ni-min-pairs", "out", "rate-column"])
+    for k in keys(opts)
+        k in known || throw(ArgumentError("unknown flag --$k"))
     end
-    return differences
-end
-
-function bootstrap_mean_ci(differences::Vector{Float64}, draws::Int=10_000)
-    isempty(differences) && return (NaN, NaN, NaN)
-    rng = MersenneTwister(0xe37)
-    n = length(differences)
-    means = Float64[]
-    for _ in 1:draws
-        total = 0.0
-        for _ in 1:n
-            total += differences[rand(rng, 1:n)]
-        end
-        push!(means, total / n)
-    end
-    sort!(means)
-    return (means[end ÷ 2], means[floor(Int, 0.025 * draws)], means[ceil(Int, 0.975 * draws)])
+    return opts
 end
 
 function main(arguments)
-    isempty(arguments) && (println(stderr, "usage: analyze_e3.jl runs.tsv [--seed-min N]"); return 2)
-    path = arguments[1]
-    seed_min = 201
-    for (flag, value) in zip(arguments[2:end], arguments[3:end])
-        flag == "--seed-min" && (seed_min = parse(Int, value))
+    opts = try
+        parse_args(arguments)
+    catch err
+        println(stderr, "error: ", sprint(showerror, err)); println(stderr, USAGE); return 2
     end
-    rows = parse_rows(path, seed_min)
-    println("report rows: ", length(rows))
-
-    by_key = Dict{String,Dict{Int,Dict{String,Row}}}()
-    for row in rows
-        cells = get!(by_key, row.cell, Dict{Int,Dict{String,Row}}())
-        arms = get!(cells, row.seed, Dict{String,Row}())
-        arms[row.arm] = row
+    opts === nothing && (println(USAGE); return 0)
+    if !haskey(opts, "tuning")
+        println(stderr, "error: --tuning <tsv> is required. Best-arrival must be selected on TUNING traces ",
+                "(prereg §2, §7); this analyzer never selects on report rows. Refusing to run.")
+        println(stderr, USAGE)
+        return 2
     end
+    haskey(opts, "report") || (println(stderr, "error: --report <tsv> is required"); println(stderr, USAGE); return 2)
 
-    arrivals = ["B3", "B4", "B5"]
-    treatments = ["P1", "P2", "P3"]
-
-    # best arrival-only arm by mean suspicion rate across report rows
-    best_arrival = nothing
-    best_score = Inf
-    for arm in arrivals
-        rates = [row.rate for row in rows if row.arm == arm && !isnan(row.rate)]
-        isempty(rates) && continue
-        score = sum(rates) / length(rates)
-        println("arrival arm ", arm, " mean suspicion rate = ", round(score; digits = 5),
-                " (n=", length(rates), ")")
-        score < best_score && (best_score = score; best_arrival = arm)
-    end
-    isnothing(best_arrival) && (println("no arrival-only baseline present"); return 1)
-    println("best arrival-only arm: ", best_arrival)
-
-    p_values = Pair{String,Float64}[]
-    for treatment in treatments
-        all_diffs = Float64[]
-        delay_ratios = Float64[]
-        for cell in sort(collect(keys(by_key)))
-            diffs = paired_difference(by_key, cell, treatment, best_arrival, r -> r.rate)
-            append!(all_diffs, diffs)
-            d95 = paired_difference(by_key, cell, treatment, best_arrival, r -> r.p95)
-            for (index, diff) in enumerate(d95)
-                base_value = diff + 0.0
-                base_value > 0.0 || continue
-            end
-            append!(delay_ratios, d95)
+    try
+        tseeds = haskey(opts, "tuning-seeds") ? parse_seed_range(opts["tuning-seeds"]) : nothing
+        rseeds = haskey(opts, "report-seeds") ? parse_seed_range(opts["report-seeds"]) : nothing
+        if abspath(opts["tuning"]) == abspath(opts["report"]) && (tseeds === nothing || rseeds === nothing)
+            throw(ArgumentError("--tuning and --report are the same file: give disjoint --tuning-seeds and --report-seeds"))
         end
-        median_diff = isempty(all_diffs) ? NaN :
-                      sort(all_diffs)[max(1, length(all_diffs) >> 1)]
-        (mean_diff, lo, hi) = bootstrap_mean_ci(all_diffs)
-        significant = !isnan(lo) && !(lo <= 0.0 <= hi)
-        relative = best_score > 0 ? -mean_diff / best_score : NaN
-        println(treatment, " vs ", best_arrival,
-                ": n=", length(all_diffs),
-                " mean reduction=", round(relative; digits=4),
-                " CI95=[", round(lo; digits=5), ", ", round(hi; digits=5), "]",
-                " significant=", significant)
-        p_approx = significant ? 0.02 : 0.4
-        push!(p_values, treatment => p_approx)
+        policy = get(opts, "status-policy", "pairwise-exclude")
+        policy in ("pairwise-exclude", "include-failed") || throw(ArgumentError("bad --status-policy '$policy'"))
+        scope = get(opts, "best-arrival-scope", "global")
+        scope in ("global", "per-cell") || throw(ArgumentError("bad --best-arrival-scope '$scope'"))
+        cfg = AnalysisConfig(
+            resamples=parse(Int, get(opts, "resamples", "10000")),
+            rng_seed=UInt64(parse(Int, get(opts, "rng-seed", "227"))),
+            ni_min_pairs=parse(Int, get(opts, "ni-min-pairs", "10")),
+            status_policy=Symbol(replace(policy, "-" => "_")),
+            best_arrival_scope=Symbol(replace(scope, "-" => "_")),
+        )
+        rate_column = get(opts, "rate-column", "false_suspicion_rate")
+        rate_column in ("false_suspicion_rate", "suspicions_per_follower_heartbeat") ||
+            throw(ArgumentError("bad --rate-column '$rate_column'"))
+        tuning = load_runs(opts["tuning"]; seeds=tseeds, rate_column=rate_column)
+        report = load_runs(opts["report"]; seeds=rseeds, rate_column=rate_column)
+        tuning_label = opts["tuning"] * (tseeds === nothing ? "" : " [seeds $(tseeds)]")
+        report_label = opts["report"] * (rseeds === nothing ? "" : " [seeds $(rseeds)]")
+        tuning = RunTable(tuning.rows, tuning_label, tuning.columns, tuning.has_leader_present_fires,
+                          tuning.has_safety_ok, tuning.has_role, tuning.has_failure_reason)
+        report = RunTable(report.rows, report_label, report.columns, report.has_leader_present_fires,
+                          report.has_safety_ok, report.has_role, report.has_failure_reason)
+        result = analyze(tuning, report, cfg)
+        text = render_report(result)
+        if haskey(opts, "out")
+            mkpath(dirname(abspath(opts["out"])))
+            write(opts["out"], text)
+            println(stderr, "wrote ", opts["out"])
+        end
+        print(text)
+        return result.halted ? 3 : 0
+    catch err
+        err isa ArgumentError || rethrow()
+        println(stderr, "error: ", err.msg)
+        return 2
     end
-
-    ordered = sort(p_values; by=last)
-    m = length(ordered)
-    threshold = 0.05
-    passed = 0
-    for (index, (name, p)) in enumerate(ordered)
-        adjusted = min(1.0, p * m / max(index, 1))
-        verdict = adjusted <= threshold
-        verdict && (passed += 1)
-        println("Holm ", name, ": adjusted_p≈", round(adjusted; digits=3),
-                " → ", verdict ? "reject H0" : "retain H0")
-    end
-    println("C4 eligible only if P2 rejects with relative reduction ≥ 0.15 and delay non-inferior.")
-    println("NOTE: approximate p-values from CI inversion; full confirmatory run pending pilot freeze (r2 tag).")
-    return 0
 end
 
 exit(main(ARGS))

@@ -1,5 +1,16 @@
 # Pre-registration addendum r3 — Experiment E3
 
+> **ERRATUM / WITHDRAWN (2026-09-23).** This addendum is withdrawn and must
+> not be tagged. Its text is kept unchanged below for the record. Known
+> errors: (1) §3 states that seeds 201–320 were untouched, but seeds 201–224
+> were executed by the voided pilot `pilot-20260826_151250` (see addendum r2
+> and `DEVIATIONS.md` D-01); (2) the power analysis behind the N = 120 freeze
+> is an artifact of a smoothing constant and a mis-specified formula (D-02);
+> (3) the tag `v0.3-e3-prereg-r3` named below was never created; (4) the
+> pilot it relies on used untuned arms, had no crash faults, and 7.7 % of its
+> runs aborted on solver errors (D-03, D-04, D-09). A superseding addendum r4
+> must resolve these before any report-seed execution.
+
 Status addendum to `PRE_REGISTRATION_E3.md` and `PRE_REGISTRATION_E3_ADDENDUM_r2.md`,
 tagged `v0.3-e3-prereg-r3` (2026-09-07). The frozen hypotheses, estimands,
 grid, seed partition, and decision rules of the base documents are unchanged.

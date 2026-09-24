@@ -61,7 +61,15 @@ function election_band(runtime::ArmRuntime, spec::TimingSpec)
         lo = exp(center + spec.band_z_low * sigma)
         hi = exp(center + spec.band_z_high * sigma)
     else
+        # O0 bands are computed by the engine from true worldlines; this
+        # branch is only its leaderless fallback.
         lo = hi = spec.base_timeout
+    end
+    if spec.arm in (:B3, :B4, :P1, :P2, :P3)
+        # Declared r4 hyperparameter: tolerate `miss_tolerance` predicted
+        # inter-arrival intervals before suspecting (1.0 = r2/r3 behaviour).
+        lo *= spec.miss_tolerance
+        hi *= spec.miss_tolerance
     end
     return _widen_and_clamp(lo, hi, runtime, spec)
 end
