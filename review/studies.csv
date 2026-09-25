@@ -1,5 +1,5 @@
 citekey,doi_or_id,source,role,ta_decision,ta_reason,ft_available,ft_decision,ft_reason
-2024,doi:10.1016/j.hcc.2024.100202,search,STUDY,include,IC1-IC4 met (survey; wireless comm./fault models),no (paywalled/blocked),pending,EC6 unless full text supplied
+2024,doi:10.1016/j.hcc.2024.100202,search,STUDY,include,IC1-IC4 met (survey; wireless comm./fault models),no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
 aeini2026,doi:10.1145/3820355.3820388,search,STUDY,include,IC1-IC4 met (IC1 relativistic model + Raft),yes (arXiv preprint),include,IC1-IC4 met (relativistic linearizability proof for an SMR incl. Raft)
 alhilal2018,arXiv:1810.01093,search,STUDY,exclude,"IC1 (interplanetary network architecture; no consensus/SMR, no relativistic computation model)",,,
 alquraan2018,url:https://www.usenix.org/conference/osdi18/presentation/alquraan,citation,STUDY,include,IC1-IC4 met (partition faults in leader-based systems; testbed),yes,include,IC1-IC4 met (partition-failure study of 25 systems incl. leader-based SMR; NEAT testbed)
@@ -12,7 +12,7 @@ davis2025,doi:10.1145/3786663,search,STUDY,include,IC1-IC4 met (Raft leases; TLA
 dwork1988,doi:10.1145/42282.42283,citation,BACKGROUND,,,,,
 elewaily2024,doi:10.1016/j.adhoc.2023.103307,search,STUDY,exclude,IC1 (DTN deep-space relay survey; no consensus/SMR) [title/venue only; no abstract],,,
 fischer1985,doi:10.1145/3149.214121,citation,BACKGROUND,,,,,
-gilbert2014,doi:10.1007/978-3-662-45174-8_25,search,STUDY,include,IC1-IC4 met (IC1 relativistic model) [title/venue only; no abstract],no (paywalled/blocked),pending,EC6 unless full text supplied
+gilbert2014,doi:10.1007/978-3-662-45174-8_25,search,STUDY,include,IC1-IC4 met (IC1 relativistic model) [title/venue only; no abstract],no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
 gray1989,doi:10.1145/74850.74870,citation,BACKGROUND,,,,,
 hayashibara2004,doi:10.1109/RELDIS.2004.1353004,citation,BACKGROUND,,,,,
 herlihy1990,doi:10.1145/78969.78972,citation,BACKGROUND,,,,,
@@ -21,7 +21,7 @@ howard2015,doi:10.1145/2723872.2723876,search,STUDY,include,IC1-IC4 met (Raft si
 howard2020,url:https://decentralizedthoughts.github.io/2020-12-12-raft-liveness-full-omission/,citation,STUDY,exclude,EC4 (blog post; not scholarly); could be kept as grey-literature BACKGROUND,,,
 hu2026,arXiv:2603.18595,search,STUDY,include,"IC1-IC4 met (Raft over wireless SDR testbed); IC2 uncertain, check at full text",yes,include,IC1-IC4 met (Raft-like consensus over 802.11p channel with fading/packet loss; SDR testbed)
 huang2018,doi:10.1109/TSMC.2019.2895471,search,STUDY,include,IC1-IC4 met (packet-loss analytical model),yes (arXiv preprint),include,IC1-IC4 met (analytical split probability vs. packet loss and election timeout)
-jayanti2025,doi:10.1145/3732772.3733563,search,STUDY,include,IC1-IC4 met (IC1 relativistic model),no (paywalled/blocked),pending,EC6 unless full text supplied
+jayanti2025,doi:10.1145/3732772.3733563,search,STUDY,include,IC1-IC4 met (IC1 relativistic model),no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
 jayanti2026,arXiv:2604.08298,search,STUDY,exclude,"IC1 (asynchronous quantum model; no relativistic spacetime, not SMR; quantum out of scope)",,,
 jeffery2023,arXiv:2311.09929,forward:jensen2021,STUDY,include,"IC1-IC4 met (etcd/Raft under edge network constraints); IC1 uncertain (replaces Raft with CRDTs), check at full text",yes,include,IC1-IC4 met (etcd/Raft evaluated under edge partitions and latency; low relevance)
 jensen2021,doi:10.1145/3447851.3458739,citation,STUDY,include,IC1-IC4 met (partial network failures; emulation),yes,include,IC1-IC4 met (Raft/etcd under partial network partitions; emulation)
@@ -38,11 +38,11 @@ mason2026,arXiv:2603.28788,search,STUDY,include,IC1-IC4 met (quorum consensus ov
 matherat2003,doi:10.1017/S0960129503004067,search,STUDY,include,IC1-IC4 met (IC1 computation vs relativistic causal structure),yes (arXiv preprint),include,IC1-IC4 met (computing machines vs. Newtonian/relativistic causal structure)
 matherat2011,doi:10.1145/2043643.2043650,search,STUDY,include,IC1-IC4 met (IC1 relativistic causality in clockless circuits),yes (arXiv preprint),include,IC1-IC4 met (relativistic causality formalism for delay-insensitive circuits)
 mattern1992,url:https://vs.inf.ethz.ch/publ/papers/relativistic_time.pdf,citation,STUDY,include,IC1-IC4 met (IC1 vector time vs Minkowski structure),yes,include,IC1-IC4 met (vector time as Minkowski-like causal structure)
-messerschmitt2017,doi:10.1109/JPROC.2017.2717980,search,STUDY,include,IC1-IC4 met (IC1 quantified relativistic timekeeping in distributed systems),no (paywalled/blocked),pending,EC6 unless full text supplied
+messerschmitt2017,doi:10.1109/JPROC.2017.2717980,search,STUDY,include,IC1-IC4 met (IC1 quantified relativistic timekeeping in distributed systems),no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
 messerschmitt2023,doi:10.1016/B978-0-323-91280-8.00012-5,search,STUDY,include,"IC1-IC4 met (IC1 local-clock timing of query/response under relativistic travel); EC3 borderline, check at full text",yes (arXiv preprint),include,IC1-IC4 met (local-clock timing and query/response latency under relativistic motion)
 naser-pastoriza2023,arXiv:2305.15150,forward:jensen2021+ng2023,STUDY,include,IC1-IC4 met (partially synchronous consensus with channel failures),yes,include,IC1-IC4 met (partially synchronous consensus under flaky channels)
 naser-pastoriza2025,doi:10.1145/3732772.3733529,forward:ng2023,STUDY,include,IC1-IC4 met (channel-failure bounds),yes (arXiv preprint),include,IC1-IC4 met (tight bounds under process-channel failures)
-ng2023,doi:10.1145/3552326.3587441,search,STUDY,include,IC1-IC4 met (partial connectivity),no (paywalled/blocked),pending,EC6 unless full text supplied
+ng2023,doi:10.1145/3552326.3587441,search,STUDY,include,IC1-IC4 met (partial connectivity),no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
 ongaro2014,url:https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf,citation,STUDY,include,IC1-IC4 met (Raft specification incl. timing and leases) [title/known source; no abstract],yes,include,"IC1-IC4 met (Raft specification, timing requirement, leases, election evaluation)"
 ongaro2014a,url:https://www.usenix.org/conference/atc14/technical-sessions/presentation/ongaro,citation,STUDY,include,IC1-IC4 met (Raft specification incl. timing requirement),yes,include,"IC1-IC4 met (Raft specification, timing requirement, election evaluation)"
 page2021,doi:10.1136/bmj.n71,method,BACKGROUND,,,,,
@@ -57,11 +57,11 @@ wang2025,arXiv:2512.21165,search,STUDY,include,IC1-IC4 met (timeouts under long-
 wang2026,doi:10.1109/INFOCOM59046.2026.11571599,search,STUDY,include,"IC1-IC4 met (cross-domain RTT; TLA+); IC2 uncertain, check at full text",yes (arXiv preprint),include,IC1-IC4 met (two-tier cross-domain RTT model; TLA+; low relevance)
 chen2002,doi:10.1109/12.980014,citation,BACKGROUND,,,,,
 wohlin2014,doi:10.1145/2601248.2601268,method,BACKGROUND,,,,,
-woos2016,doi:10.1145/2854065.2854081,citation,STUDY,include,IC1-IC4 met (verified safety under drop/duplicate/reorder network),no (paywalled/blocked),pending,EC6 unless full text supplied
-zotero-item-553,doi:10.1109/TNSM.2022.3147958,search,STUDY,include,IC1-IC4 met (delay-dependent election model; testbed),no (paywalled/blocked),pending,EC6 unless full text supplied
-zotero-item-554,doi:10.1109/HPCC-DSS-SmartCity-DependSys57074.2022.00076,search,STUDY,include,IC1-IC4 met (delay/loss-rate model of log commitment),no (paywalled/blocked),pending,EC6 unless full text supplied
-zotero-item-556,doi:10.1007/978-3-030-78618-2_47,search,STUDY,include,IC1-IC4 met (Raft under high network latency); EC1 borderline [title/venue only; no abstract],no (paywalled/blocked),pending,EC6 unless full text supplied
-zotero-item-557,doi:10.1109/CISCE65916.2025.11065606,search,STUDY,include,IC1-IC4 met (Raft reads under satellite latency),no (paywalled/blocked),pending,EC6 unless full text supplied
+woos2016,doi:10.1145/2854065.2854081,citation,STUDY,include,IC1-IC4 met (verified safety under drop/duplicate/reorder network),no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
+zotero-item-553,doi:10.1109/TNSM.2022.3147958,search,STUDY,include,IC1-IC4 met (delay-dependent election model; testbed),no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
+zotero-item-554,doi:10.1109/HPCC-DSS-SmartCity-DependSys57074.2022.00076,search,STUDY,include,IC1-IC4 met (delay/loss-rate model of log commitment),no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
+zotero-item-556,doi:10.1007/978-3-030-78618-2_47,search,STUDY,include,IC1-IC4 met (Raft under high network latency); EC1 borderline [title/venue only; no abstract],no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
+zotero-item-557,doi:10.1109/CISCE65916.2025.11065606,search,STUDY,include,IC1-IC4 met (Raft reads under satellite latency),no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
 racs_tennage_2024#L1,arXiv:2404.04183,forward:ng2023,STUDY,exclude,EC5 (duplicate of tennage2025),,,
 multipaxos_liang_2024,arXiv:2405.11183,forward:jensen2021+ng2023,STUDY,include,"IC1-IC4 met (MultiPaxos leader election/failure detector, partition tolerance); IC2 uncertain, check at full text",yes,include,IC1-IC4 met (MultiPaxos failure detector/heartbeats under partial connectivity and partitions)
 tight_naserpastoriza_2025#L3,litmaps:286908008,forward:ng2023,STUDY,exclude,EC5 (duplicate of naser-pastoriza2025),,,
