@@ -63,18 +63,18 @@ zotero-item-554,doi:10.1109/HPCC-DSS-SmartCity-DependSys57074.2022.00076,search,
 zotero-item-556,doi:10.1007/978-3-030-78618-2_47,search,STUDY,include,IC1-IC4 met (Raft under high network latency); EC1 borderline [title/venue only; no abstract],no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
 zotero-item-557,doi:10.1109/CISCE65916.2025.11065606,search,STUDY,include,IC1-IC4 met (Raft reads under satellite latency),no (paywalled/blocked),exclude,EC6 (full text not retrievable: publisher blocks automated access; not supplied)
 racs_tennage_2024#L1,arXiv:2404.04183,forward:ng2023,STUDY,exclude,EC5 (duplicate of tennage2025),,,
-multipaxos_liang_2024,arXiv:2405.11183,forward:jensen2021+ng2023,STUDY,include,"IC1-IC4 met (MultiPaxos leader election/failure detector, partition tolerance); IC2 uncertain, check at full text",yes,include,IC1-IC4 met (MultiPaxos failure detector/heartbeats under partial connectivity and partitions)
+liang2024,arXiv:2405.11183,forward:jensen2021+ng2023,STUDY,include,"IC1-IC4 met (MultiPaxos leader election/failure detector, partition tolerance); IC2 uncertain, check at full text",yes,include,IC1-IC4 met (MultiPaxos failure detector/heartbeats under partial connectivity and partitions)
 tight_naserpastoriza_2025#L3,litmaps:286908008,forward:ng2023,STUDY,exclude,EC5 (duplicate of naser-pastoriza2025),,,
 scalable_kettaneh_2026#L4,doi:10.1145/3788853.3803081,forward:ng2023,STUDY,exclude,EC5 (duplicate of kettaneh2026),,,
 racssadl_tennage_2024#L5,doi:10.1109/cloud67622.2025.00044,forward:ng2023,STUDY,exclude,EC5 (duplicate of tennage2025),,,
 tight_naserpastoriza_2025#L6,doi:10.1145/3732772.3733529,forward:ng2023,STUDY,exclude,EC5 (duplicate of naser-pastoriza2025),,,
-smart_howard_2024#L9,arXiv:2406.17455,forward:jensen2021,STUDY,exclude,EC5 (duplicate of smart_howard_2024),,,
+smart_howard_2024#L9,arXiv:2406.17455,forward:jensen2021,STUDY,exclude,EC5 (duplicate of howard2025),,,
 distributed_li_2025#L10,arXiv:2502.12069,forward:jensen2021,STUDY,exclude,EC5 (duplicate of li2026),,,
 distributed_li_2026#L11,doi:10.1109/ton.2026.3667834,forward:jensen2021,STUDY,exclude,EC5 (duplicate of li2026),,,
-smart_howard_2024,url:https://www.usenix.org/conference/nsdi25/presentation/howard,forward:jensen2021,STUDY,include,"IC1-IC4 met (TLA+ model checking of CCF Raft-derived consensus); IC2 uncertain, check at full text",yes,include,"IC1-IC4 met (TLA+ model with message loss, reordering, timeouts for CCF Raft-derived consensus)"
+howard2025,url:https://www.usenix.org/conference/nsdi25/presentation/howard,forward:jensen2021,STUDY,include,"IC1-IC4 met (TLA+ model checking of CCF Raft-derived consensus); IC2 uncertain, check at full text",yes,include,"IC1-IC4 met (TLA+ model with message loss, reordering, timeouts for CCF Raft-derived consensus)"
 enhancing_jang_2023,doi:10.1109/iceib57887.2023.10170110,forward:jensen2021,STUDY,exclude,IC1; IC2 (Kubernetes/Docker Swarm HA operations; no consensus network-model analysis),,,
 distributed_li_2025#L14,arXiv:2502.12069,forward:jensen2021,STUDY,exclude,EC5 (duplicate of li2026),,,
-smart_howard_2024#L15,litmaps:274584253,forward:jensen2021,STUDY,exclude,EC5 (duplicate of smart_howard_2024),,,
+smart_howard_2024#L15,litmaps:274584253,forward:jensen2021,STUDY,exclude,EC5 (duplicate of howard2025),,,
 reckoning_sassi_2025,doi:10.1145/3719159.3721222,forward:jensen2021,STUDY,exclude,"IC1 (Kubernetes edge emulator; orchestration, not consensus/SMR)",,,
 mutating_jeffery_2023#L17,arXiv:2311.09929,forward:jensen2021,STUDY,exclude,EC5 (duplicate of jeffery2023),,,
 generative_liu_2026,doi:10.1109/gaiis69281.2026.11519245,forward:davis2025,STUDY,exclude,IC1 (LLM-driven consistency for distributed simulation),,,

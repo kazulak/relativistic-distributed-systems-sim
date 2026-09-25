@@ -76,6 +76,18 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Limitations:** LAN-calibrated; no loss in the reproduced experiments; livelock analysis deferred to a technical report (p. 8).
 - **Extraction confidence:** high
 
+### howard2025
+- **Full reference:** H. Howard, M. A. Kuppe, E. Ashton et al. "Smart Casual Verification of the Confidential Consortium Framework." 22nd USENIX Symposium on Networked Systems Design and Implementation (NSDI 25), 2025. url:https://www.usenix.org/conference/nsdi25/presentation/howard
+- **Communication model:** Spec models in-transit messages as a set, supporting ordered or unordered delivery abstractions (p. 6); non-determinism in timeouts and message delivery; crashes and message loss (p. 2). Host, OS, network and storage untrusted at the platform level (p. 3), but the consensus protocol is crash fault-tolerant (p. 4).
+- **Properties analysed:** safety and liveness of CCF's Raft-derived consensus and its client consistency model.
+- **Method:** "smart casual verification": TLA+ specification, model checking and simulation with TLC, and trace validation of the C++ implementation against the spec (p. 3, p. 8).
+- **Raft mechanisms and timing/clock assumptions as stated:** Election timeouts, CheckQuorum, and a "partition leader step down" extension, motivated because "partial/asymmetric network partitions can cause a loss of liveness" in base Raft: a leader that cannot receive messages keeps sending heartbeats and prevents followers from timing out (p. 5). Time progression is modelled as independent of other actions (p. 7). No clock-rate assumptions reported.
+- **Physical parameters:** not reported.
+- **Key results:** Six bugs found before production: five safety (e.g. incorrect election quorum tally allowing two leaders in one term; commit advance for a previous term; truncation of committed entries from stale AE-NACKs) and one liveness (premature node retirement) (Table 2, p. 11).
+- **Relevance:** RQ1 (model checking of a Raft variant under an explicit lossy, reordering network abstraction); RQ2 (liveness under partial/asymmetric partitions requires extensions).
+- **Limitations:** CCF-specific protocol; safety bugs are implementation-spec divergences rather than communication-model results.
+- **Extraction confidence:** high
+
 ### hu2026
 - **Full reference:** Z. Hu, T. Dan, Z. Tao et al. "RUBICONe: Wireless RAFT-Unified Behaviors for Intervehicular Cooperative Operations and Negotiations." arXiv, 2026. arXiv:2603.18595
 - **Communication model:** IEEE 802.11p vehicular channels with Rayleigh fading, Doppler shifts and CSMA/CA; packet loss, variable latency and signal degradation (p. 2). The baseline reliability model assumes independent packet loss (p. 4).
@@ -172,6 +184,18 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Limitations:** Satellite links are not modelled physically (simulated RTT only); safety argument informal; blockchain framing.
 - **Extraction confidence:** medium
 
+### liang2024
+- **Full reference:** Z. Liang, V. Jabrayilov, A. Charapko, A. Aghayev. "MultiPaxos Made Complete." arXiv, 2024. arXiv:2405.11183
+- **Communication model:** Partial network partitions: "leader-losing-quorum" (all peers disconnected from each other except one stable peer) and "leader-churning" (two peers mutually unreachable but connected through a third, as in the Cloudflare incident) (p. 2, p. 8); 20 s partitions in experiments (p. 11).
+- **Properties analysed:** availability (normalised throughput) under partial partitions; resource use; safety noted as unaffected by partial partitions (p. 3).
+- **Method:** complete MultiPaxos design and implementation; experiments with YCSB against etcd's Raft with and without CheckQuorum (pp. 11–12).
+- **Raft mechanisms and timing/clock assumptions as stated:** Heartbeats piggybacked on Commit requests every commit_interval; followers start elections on missed heartbeats (p. 7). Adaptive timeout: peers that participate excessively in elections increase their timeout (p. 2, p. 8). etcd CheckQuorum: leader steps down on losing majority connectivity and followers ignore votes while hearing from a leader (p. 11). Raft's consecutive-log requirement is said, citing prior work, to deadlock under some partial partitions (p. 1).
+- **Physical parameters:** not reported beyond partition timing.
+- **Key results:** Leader-losing-quorum: MultiPaxos and etcd without CheckQuorum drop to 65–75% and 65–70% and recover once the stable peer is elected; etcd with CheckQuorum varies from about 90% down to below 10% because the stable peer's term can lag (pp. 11–12). Leader-churning: classic MultiPaxos loses nearly 99% of throughput; adaptive-timeout MultiPaxos only 30%; etcd 20–90%; etcd with CheckQuorum is unaffected during the partition but suffers several election rounds after it heals (p. 12).
+- **Relevance:** RQ1 (partial-connectivity model; testbed); RQ2 (CheckQuorum and timeout adaptation affect availability, with outcomes that depend on the partition shape).
+- **Limitations:** Preprint; MultiPaxos rather than Raft, though etcd-Raft is measured directly; performance-level, no proofs.
+- **Extraction confidence:** high
+
 ### luo2023
 - **Full reference:** H. Luo, X. Yang, H. Yu et al. "Performance Analysis and Comparison of Non-ideal Wireless PBFT and RAFT Consensus Networks in 6G Communications." arXiv, 2023. arXiv:2304.08697
 - **Communication model:** Wireless physical layer: Rayleigh fading and close-in free-space reference-distance path loss, for THz and mmWave signals (p. 1, p. 2). Nodes separated by distance; transmission success depends on SINR.
@@ -244,18 +268,6 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Limitations:** No distributed-coordination protocol or fault model; extreme (interstellar) regime. The PDF is the arXiv preprint; the published version is a 2024 Elsevier book chapter (DOI 10.1016/B978-0-323-91280-8.00012-5).
 - **Extraction confidence:** medium (long analytical paper; only the framework and headline results extracted)
 
-### multipaxos_liang_2024
-- **Full reference:** Z. Liang, V. Jabrayilov, A. Charapko, A. Aghayev. "MultiPaxos Made Complete." arXiv preprint, 2024. arXiv:2405.11183
-- **Communication model:** Partial network partitions: "leader-losing-quorum" (all peers disconnected from each other except one stable peer) and "leader-churning" (two peers mutually unreachable but connected through a third, as in the Cloudflare incident) (p. 2, p. 8); 20 s partitions in experiments (p. 11).
-- **Properties analysed:** availability (normalised throughput) under partial partitions; resource use; safety noted as unaffected by partial partitions (p. 3).
-- **Method:** complete MultiPaxos design and implementation; experiments with YCSB against etcd's Raft with and without CheckQuorum (pp. 11–12).
-- **Raft mechanisms and timing/clock assumptions as stated:** Heartbeats piggybacked on Commit requests every commit_interval; followers start elections on missed heartbeats (p. 7). Adaptive timeout: peers that participate excessively in elections increase their timeout (p. 2, p. 8). etcd CheckQuorum: leader steps down on losing majority connectivity and followers ignore votes while hearing from a leader (p. 11). Raft's consecutive-log requirement is said, citing prior work, to deadlock under some partial partitions (p. 1).
-- **Physical parameters:** not reported beyond partition timing.
-- **Key results:** Leader-losing-quorum: MultiPaxos and etcd without CheckQuorum drop to 65–75% and 65–70% and recover once the stable peer is elected; etcd with CheckQuorum varies from about 90% down to below 10% because the stable peer's term can lag (pp. 11–12). Leader-churning: classic MultiPaxos loses nearly 99% of throughput; adaptive-timeout MultiPaxos only 30%; etcd 20–90%; etcd with CheckQuorum is unaffected during the partition but suffers several election rounds after it heals (p. 12).
-- **Relevance:** RQ1 (partial-connectivity model; testbed); RQ2 (CheckQuorum and timeout adaptation affect availability, with outcomes that depend on the partition shape).
-- **Limitations:** Preprint; MultiPaxos rather than Raft, though etcd-Raft is measured directly; performance-level, no proofs.
-- **Extraction confidence:** high
-
 ### naser-pastoriza2023
 - **Full reference:** A. Naser-Pastoriza, G. Chockler, A. Gotsman. "Fault-Tolerant Computing with Unreliable Channels (Extended Version)." arXiv, 2023. arXiv:2305.15150
 - **Communication model:** Process crashes plus channel failures: correct channels eventually reliable, faulty channels "flaky", able to drop any message with no fairness guarantee; covers indirect, asymmetric and intermittent connectivity (pp. 1–3). Asynchrony for registers; partial synchrony (asynchronous period, then synchronous) for consensus (p. 3).
@@ -297,7 +309,7 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Communication model:** Servers crash-stop and may recover; safety independent of timing: "faulty clocks and extreme message delays can, at worst, cause availability problems" (p. 3). Availability requires broadcastTime ≪ electionTimeout ≪ MTBF (p. 10). Evaluation on a real cluster; the network is not otherwise parameterised.
 - **Properties analysed:** safety (argued; formal proof referenced), availability/leader-election latency.
 - **Method:** algorithm design; implementation and testbed measurement (Fig. 14, p. 14); user study (not relevant here).
-- **Raft mechanisms and timing/clock assumptions as stated:** Terms act as a logical clock (p. 6). Randomised election timeouts, for example 150–300 ms (p. 7). Timing requirement broadcastTime ≪ electionTimeout ≪ MTBF (p. 10). Servers ignore RequestVote within the minimum election timeout of hearing from a current leader (p. 12). Client interaction and linearizable reads, and so leases, are omitted and deferred to the extended version (p. 12).
+- **Raft mechanisms and timing/clock assumptions as stated:** Terms act as a logical clock; "Raft ensures that there is at most one leader in a given term" (p. 6). Randomised election timeouts, for example 150–300 ms (p. 7). Timing requirement broadcastTime ≪ electionTimeout ≪ MTBF (p. 10). Servers ignore RequestVote within the minimum election timeout of hearing from a current leader (p. 12). Client interaction and linearizable reads, and so leases, are omitted and deferred to the extended version (p. 12).
 - **Physical parameters:** not reported, apart from timeout values.
 - **Key results:** 5 ms of randomness gives median downtime 287 ms; 50 ms worst case 513 ms over 1000 trials; 12–24 ms timeouts give 35 ms average election; lower timeouts violate the timing requirement; 150–300 ms recommended (p. 14).
 - **Relevance:** RQ1 (safety time-independent); RQ2 (election timeout and heartbeat affect availability only).
@@ -338,18 +350,6 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Key results:** On Raft, mean detection time falls 78% (1171 → 258 ms) and OTS time 45% (1420 → 777 ms) (p. 7); on Multi-Paxos 79% and 75% (p. 1). Without pre-vote one unnecessary election occurs during an RTT jump (p. 13).
 - **Relevance:** RQ1 (variable-delay, lossy WAN model); RQ2 (election timeout and heartbeat affect availability; liveness stated to need bounded drift and delay).
 - **Limitations:** Parameters derived from measured conditions; clock-drift bound only cited as a liveness assumption, not analysed. The retrieved PDF carries the IEEE Access 2026 header.
-- **Extraction confidence:** high
-
-### smart_howard_2024
-- **Full reference:** H. Howard, M. A. Kuppe, E. Ashton, A. Chamayou, N. Crooks. "Smart Casual Verification of the Confidential Consortium Framework." USENIX NSDI 2025. url:https://www.usenix.org/conference/nsdi25/presentation/howard
-- **Communication model:** Spec models in-transit messages as a set, supporting ordered or unordered delivery abstractions (p. 6); non-determinism in timeouts and message delivery; crashes and message loss (p. 2). Host, OS, network and storage untrusted at the platform level (p. 3), but the consensus protocol is crash fault-tolerant (p. 4).
-- **Properties analysed:** safety and liveness of CCF's Raft-derived consensus and its client consistency model.
-- **Method:** "smart casual verification": TLA+ specification, model checking and simulation with TLC, and trace validation of the C++ implementation against the spec (p. 3, p. 8).
-- **Raft mechanisms and timing/clock assumptions as stated:** Election timeouts, CheckQuorum, and a "partition leader step down" extension, motivated because "partial/asymmetric network partitions can cause a loss of liveness" in base Raft: a leader that cannot receive messages keeps sending heartbeats and prevents followers from timing out (p. 5). Time progression is modelled as independent of other actions (p. 7). No clock-rate assumptions reported.
-- **Physical parameters:** not reported.
-- **Key results:** Six bugs found before production: five safety (e.g. incorrect election quorum tally allowing two leaders in one term; commit advance for a previous term; truncation of committed entries from stale AE-NACKs) and one liveness (premature node retirement) (Table 2, p. 11).
-- **Relevance:** RQ1 (model checking of a Raft variant under an explicit lossy, reordering network abstraction); RQ2 (liveness under partial/asymmetric partitions requires extensions).
-- **Limitations:** CCF-specific protocol; safety bugs are implementation-spec divergences rather than communication-model results.
 - **Extraction confidence:** high
 
 ### tennage2023
