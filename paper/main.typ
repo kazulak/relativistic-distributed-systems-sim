@@ -62,7 +62,7 @@ themselves motivated by special relativity @lamport1978, yet whether a concrete,
 widely deployed protocol stays correct under physical constraints has only
 recently been studied formally @gilbert2014 @jayanti2025 @aeini2026.
 
-We take Raft @ongaro2014 as the object of study. It is widely deployed and
+We take Raft @ongaro2014a as the object of study. It is widely deployed and
 precisely specified, and it separates cleanly into a timing-independent safety
 core and timing-dependent mechanisms. The survey's aim is to fix the boundaries
 of current knowledge before any new analysis is attempted: what has been
@@ -188,11 +188,11 @@ modelling or testbeds.
 #figure(
   table(columns: (auto, 1fr, auto),
     table.header[Model][What is analysed][Studies],
-    [Asynchronous], [Safety of the time-free core; machine-checked proofs], [@ongaro2014 @woos2016],
-    [Partially synchronous], [Liveness of leader election; timing requirement that broadcast time be much less than the election timeout], [@dwork1988 @ongaro2014thesis],
+    [Asynchronous], [Safety of the time-free core; machine-checked proofs], [@ongaro2014a @woos2016],
+    [Partially synchronous], [Liveness of leader election; timing requirement that broadcast time be much less than the election timeout], [@dwork1988 @ongaro2014],
     [Omission, partial connectivity], [Livelock and leaderlessness under partial partitions; PreVote and CheckQuorum counterexamples; real-world partition failures], [@jensen2021 @howard2020 @ng2023 @alquraan2018],
-    [Unreliable channels], [Which channel failures consensus can tolerate; tight bounds via generalised quorum systems], [@naserpastoriza2023 @naserpastoriza2025],
-    [Probabilistic loss and delay], [Split probability, commit latency and reliability as functions of loss rate and timeouts], [@huang2018 @li2023 @li2026dcn @sakic2019 @howard2015],
+    [Unreliable channels], [Which channel failures consensus can tolerate; tight bounds via generalised quorum systems], [@naser-pastoriza2023 @naser-pastoriza2025],
+    [Probabilistic loss and delay], [Split probability, commit latency and reliability as functions of loss rate and timeouts], [@huang2018 @li2023 @li2026 @sakic2019 @howard2015],
     [Variable wide-area delay], [Adaptive or learned election timeouts; randomised protocols whose liveness does not rest on timeouts], [@shiozaki2025 @wang2025 @tennage2023 @tennage2025],
     [Wireless, edge, space], [Raft variants and evaluations for vehicular, edge and satellite links; DTN architecture], [@hu2026 @jeffery2023 @li2026a @burleigh2003 @cerf2007],
     [Relativistic spacetime], [Correctness conditions and safety proofs under causal (light-cone) delivery], [@gilbert2014 @jayanti2025 @aeini2026],
@@ -205,11 +205,11 @@ modelling or testbeds.
 Raft uses time in four places (@tab:timing). Election timeouts, heartbeats, and
 the PreVote and CheckQuorum extensions affect only availability: a badly tuned
 timeout causes needless or failed elections but never two leaders in one term
-@ongaro2014 @ongaro2014thesis. The exception is the leader lease used to serve
+@ongaro2014a @ongaro2014. The exception is the leader lease used to serve
 linearizable reads without a quorum round-trip. Its safety requires that the
 leader's lease expire, on the leader's clock, before any follower's election
 timeout could have let a new leader emerge. That in turn needs a bound on how
-far the two clocks' rates can diverge @ongaro2014thesis.
+far the two clocks' rates can diverge @ongaro2014.
 
 The lease literature states this assumption as a bounded drift rate relative to
 real time. This holds for the original lease mechanism @gray1989, for the
@@ -218,7 +218,7 @@ Raft-specific designs, including a TLA+-verified Raft lease @davis2025 and a
 production design for many consensus groups @kettaneh2026. Adversarial
 manipulation of clock rates is treated as a threat to lease safety @trach2021.
 ReadIndex, the quorum-based alternative, uses no clock and is safe
-asynchronously @ongaro2014thesis.
+asynchronously @ongaro2014.
 
 #figure(
   table(columns: (auto, auto, 1fr),
@@ -251,7 +251,7 @@ Forward chasing of all seeds surfaced no further work in this strand.
 A separate engineering literature quantifies relativistic timekeeping: its
 magnitude in navigation and communications @ashby2003 @messerschmitt2017
 @messerschmitt2023, and its effect on information freshness
-@salimnejad2025 @kovacevic2024. None of it contains a model of distributed
+@salimnejad2024 @kovacevic2024. None of it contains a model of distributed
 coordination.
 
 == RQ4: Clock-based coordination under physical time
@@ -272,7 +272,7 @@ and what is open.
 *Established.*
 - Raft's safety is independent of timing and holds under relativistic causality @woos2016 @aeini2026.
 - Its liveness requires partial synchrony @dwork1988 and fails in specific, well-characterised ways under partial connectivity @jensen2021 @ng2023.
-- Its only timing-dependent safety mechanism is the leader lease @ongaro2014thesis.
+- Its only timing-dependent safety mechanism is the leader lease @ongaro2014.
 
 *Directly derivable.* Three consequences follow from the models above without
 new results.
