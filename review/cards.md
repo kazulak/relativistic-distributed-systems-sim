@@ -1,6 +1,6 @@
 # Data-extraction cards
 
-One card per included study (34). Extracted by Claude Code from the full texts in `review/pdf/`; the author approved screening and eligibility at the checkpoints.
+One card per included study (41). Extracted by Claude Code from the full texts in `review/pdf/`; the author approved screening and eligibility at the checkpoints.
 
 Conventions: page numbers are PDF page numbers of the retrieved file (for the Ongaro thesis, printed page = PDF page − 18). Where the retrieved file is a preprint, the card says so; the reference gives the published version where one exists. "Not reported" means the item was looked for and not found in the text. Quotations are under 15 words.
 
@@ -50,6 +50,18 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Key results:** Lease reads cut consistent-read overhead from one network round trip to zero; write throughput rises from about 1,000 to about 10,000 writes/s; a new leader allows 99% of reads immediately instead of blocking all reads (p. 1). Prior Raft lease implementations are reported to have open stale-read bugs (etcd, 2024) and long unavailability after elections (TiDB, 10 s) (p. 1).
 - **Relevance:** RQ2 (the lease is the clock-dependent safety mechanism; its assumption is stated as bounded clock *uncertainty relative to true time*, not as a drift-rate bound); RQ4 (the assumption presupposes a single "true time", a global simultaneity convention).
 - **Limitations:** The correctness argument is prose over a TLA+ model; clock bounds are assumed correct, not derived. The PDF is the arXiv preprint (published in PACMMOD, DOI 10.1145/3786663).
+- **Extraction confidence:** high
+
+### gilbert2014
+- **Full reference:** S. Gilbert, W. Golab. "Making Sense of Relativistic Distributed Systems." Springer Berlin Heidelberg, 2014. doi:10.1007/978-3-662-45174-8_25
+- **Communication model:** Relativistic: a history H = (E, <E) of events partially ordered by the happens-before relation of special relativity (e2 in the light cone of e1); no global clock (pp. 1, 3, 10). Message passing and shared objects; no failure model analysed.
+- **Properties analysed:** safety: correctness conditions for shared objects (relativistic linearizability) and their locality (composability).
+- **Method:** definitions and proofs.
+- **Raft mechanisms and timing/clock assumptions as stated:** not Raft-specific. Linearizability "is grounded in classical physics": it assumes a total temporal order, "tantamount to assuming the existence of a global clock" (p. 1). Linearization points are likewise "tantamount to the assumption of a global clock" (p. 3).
+- **Physical parameters:** none quantitative; motivation: Mars colony, interplanetary Internet (p. 2).
+- **Key results:** Four candidate definitions R0–R3 (R1: linearizable in some frame; R2: in every frame; R3: every frame and a common linearization) forming a hierarchy (Theorem 1, p. 9). R0 and R1 are not local (Theorem 2), R2 is local (Theorem 3), R3 is not local (Theorem 4) (pp. 9–10). Sufficient conditions ("R2-conducive" R1-linearizations; connectedness) to infer R2 and R3 from R1 (Theorems 5–6, pp. 11–12); R3 can be made local via relativistic linearization points (Theorem 7, p. 13). The authors consider R2 "the most natural definition" and propose calling it E-linearizability (p. 14). They state, without a full proof, that Paxos state machine replication satisfies R1, the R2-conducive and connected properties, hence R3 via Theorem 6 (p. 14); quorum systems whose reads need not overlap attain R2 but not R3 (p. 14).
+- **Relevance:** RQ3 (foundational definitions); RQ4 (all results concern histories, not clock-based coordination).
+- **Limitations:** No proofs for concrete algorithms (the Paxos statement is a remark); no fault or timing model. PDF page numbers differ from printed (LNCS 8784, pp. 361–375): printed = PDF + 360.
 - **Extraction confidence:** high
 
 ### howard2014
@@ -112,6 +124,18 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Limitations:** Independence assumptions; heartbeat loss only, no delay distribution; blockchain framing. The PDF is the arXiv preprint (published in IEEE Trans. SMC: Systems, 2019).
 - **Extraction confidence:** high
 
+### jayanti2025
+- **Full reference:** S. V. Jayanti. "On Interplanetary and Relativistic Distributed Computing." ACM, 2025. doi:10.1145/3732772.3733563
+- **Communication model:** Asynchronous processors separated in space and possibly in relative motion; asynchronous message passing (and shared memory); crash failures (p. 3). Classical postulates (CP1–CP2) and relativistic postulates (RP1–RP3): steps at one processor totally ordered; a transmission's sending relativistically precedes its reception (pp. 3–6).
+- **Properties analysed:** any property of totally ordered executions, in particular linearizability.
+- **Method:** unified formal model and proofs (central theorem; Equivalence Theorem 6.8).
+- **Raft mechanisms and timing/clock assumptions as stated:** not Raft-specific. The model has no clocks or timeouts; the central theorem concerns "asynchronous distributed algorithms" (p. 1).
+- **Physical parameters:** none quantitative; motivation: Interplanetary Internet, GPS (p. 1).
+- **Key results:** For any algorithm 𝒜 and property 𝒫: 𝒜 satisfies 𝒫 classically iff every relativistic execution satisfies 𝒫 in every observer's frame iff every total ordering of every computational execution satisfies 𝒫 (p. 1). Consequently an algorithm is linearizable iff computationally linearizable iff relativistically linearizable (Theorem 6.8, p. 10), so asynchronous linearizable algorithms "will remain strongly consistent" in interplanetary systems (p. 2, p. 10). Its relativistic linearizability "differs slightly from R2-linearizability" by restricting to orderings that correspond to actual reference frames; the result holds for either definition (p. 3). States that no previous proofs of any algorithm being relativistically linearizable were known (p. 2).
+- **Relevance:** RQ3 (general transfer theorem for asynchronous algorithms, which covers Raft's time-free core); RQ4 (clocks outside the model).
+- **Limitations:** Does not treat algorithms whose correctness uses clocks or timeouts; not Raft-specific.
+- **Extraction confidence:** high
+
 ### jeffery2023
 - **Full reference:** A. Jeffery, H. Howard, R. Mortier. "Mutating Etcd Towards Edge Suitability." arXiv, 2023. arXiv:2311.09929
 - **Communication model:** Edge deployments across geographically distributed sites with unreliable latency and bandwidth (p. 2); partitions injected with iptables and delays with Linux traffic control (10% variation, 25% correlation) (p. 9).
@@ -147,6 +171,30 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Relevance:** RQ2 (production Raft lease); RQ4 (lease safety is stated in a timestamp domain with causal propagation of clock values, not as bounded drift against real time; real-time consistency is delegated to a separate layer). This is the closest the corpus comes to a frame-free formulation of lease safety, but it does not analyse physical or relativistic time.
 - **Limitations:** Proofs are sketches; the mapping from timestamp disjointness to real-time linearizability is outside the paper (p. 3). Industry companion paper; the PDF is the Cockroach Labs copy.
 - **Extraction confidence:** high
+
+### lamport1986
+- **Full reference:** L. Lamport. "On Interprocess Communication. Part I: Basic Formalism." Distributed Computing, 1986. doi:10.1007/BF01786227 (read from the author's 1985 report version, 56 pages, at https://lamport.azurewebsites.net/pubs/interprocess.pdf)
+- **Communication model:** Abstract system executions: operation executions related by "precedes" (→) and "can affect" (⇢) over a set of events E, with axioms A1–A5 (p. 10). Two model classes: E as four-dimensional spacetime with → "the 'happens before' relation of special relativity", and global-time models on the real line (p. 10).
+- **Properties analysed:** foundations for specifying and implementing interprocess communication (registers); what holds without a global-time model.
+- **Method:** axiomatic formalism with propositions.
+- **Raft mechanisms and timing/clock assumptions as stated:** not applicable. In a global-time model any two distinct operations satisfy A → B or B ⇢ A; without one, neither need hold (p. 11). Axiom A5 holds in spacetime models when operations occupy finite regions and "the system is not expanding faster than the speed of light" (p. 11).
+- **Physical parameters:** not reported.
+- **Key results:** A formalism for concurrent operations that does not assume global time, with relativistic spacetime as an admissible model (pp. 10–11). A global-time model is "a valuable aid" for intuition, but proofs should use the abstract relations (p. 11).
+- **Relevance:** RQ3 (earliest formal treatment in the corpus of executions in relativistic spacetime; the model Gilbert and Golab cite as their starting point).
+- **Limitations:** Formalism only; no algorithms whose correctness depends on timing; Part II (registers) not extracted.
+- **Extraction confidence:** medium (report version; Part I sections on the model read)
+
+### landers2026
+- **Full reference:** R. Landers, K. Kramer. "Light Cone Consistency: Closure, Ordering, and the Single-Observer Boundary." arXiv, 2026. arXiv:2605.09114
+- **Communication model:** Message passing as a growing causal DAG observed by a set of observers; "no reliable channels, no bounded delays, no synchronized clocks, no failure model" beyond the DAG and three axioms (p. 3). For the clock theorem: messages created at real time r(m) with timestamp r(m) + b for per-node clock error |b| ≤ ε; cross-node causal edges need gap at least the link latency (p. 30).
+- **Properties analysed:** consistency models as configurations of a causal-closure filter and a fork-resolution order; readability, mergeability, permanence of ordering errors.
+- **Method:** formal definitions and theorems.
+- **Raft mechanisms and timing/clock assumptions as stated:** not Raft-specific. Theorem 60: with |b| ≤ ε and ties broken consistently with causality (as a hybrid logical clock does), timestamp order refines causality iff 2ε ≤ d_min (p. 30). Detection = Prevention holds only for "endogenous" arbitration, with no reading of a synchronized physical clock; clock-driven arbitration is outside its scope (p. 16).
+- **Physical parameters:** none quantitative (ε and d_min symbolic).
+- **Key results:** Linearizability is "a composite of two message-passing systems": a store plus a global real-time serializer, because a single order over spacelike-separated operations "is a preferred frame" that no observer's light cone supplies (p. 2). A clock-timestamp order is causally clean iff 2ε ≤ d_min (Theorem 60, p. 30; Remark 39, p. 14). "The spacetime / global-time-function reading is explicitly interpretation" (p. 14).
+- **Relevance:** RQ3 (observer-relative consistency framed in light-cone terms); RQ4 (clock-based ordering safety as a ratio of clock error to minimum latency, stated against a Newtonian real time r(m), not relativistic proper time).
+- **Limitations:** Preprint by an industry team; the relativistic reading is interpretive; not about leases or Raft.
+- **Extraction confidence:** medium (32-page paper; abstract, model, Theorem 43/60 and Remark 39 read)
 
 ### li2023
 - **Full reference:** Y. Li, Y. Fan, L. Zhang, J. Crowcroft. "RAFT Consensus Reliability in Wireless Networks: Probabilistic Analysis." IEEE Internet of Things Journal, 2023. doi:10.1109/JIOT.2023.3257402
@@ -256,6 +304,18 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Limitations:** Analogy, not a physical model of computation; no clocks measuring proper time, no protocol correctness. The paper states it is based on the author's earlier papers, including "Virtual Time and Global States of Distributed Systems" (p. 1).
 - **Extraction confidence:** high (text layer has OCR-like spacing artefacts; content unambiguous)
 
+### messerschmitt2017
+- **Full reference:** D. G. Messerschmitt. "Relativistic Timekeeping, Motion, and Gravity in Distributed Systems." Proceedings of the IEEE, 2017. doi:10.1109/JPROC.2017.2717980
+- **Communication model:** Distributed systems of manufactured nodes (satellites, spacecraft, distributed computing, communications) with clocks in relative motion or at different gravitational potential; special relativity with the equivalence principle, neglecting gravity in the presence of motion and vice versa (p. 1).
+- **Properties analysed:** clock rate and time synchronisation under motion or gravity. No protocol safety or liveness.
+- **Method:** survey of applications plus closed-form analytical models; kinematics referenced to frame-invariant proper time (p. 1).
+- **Raft mechanisms and timing/clock assumptions as stated:** not applicable. Distributed computing: ordering-only algorithms can use virtual clocks "without regard to times or time intervals", but "there are many instances where this approach is not applicable, and accurate timekeeping becomes necessary", for example financial transactions (p. 11). Observers in relative motion disagree on simultaneity of longitudinally separated events (p. 53).
+- **Physical parameters:** GPS: ±10 m positioning; relativistic corrections needed for gravity, satellite motion and Earth rotation (p. 11). Other quantitative values not extracted.
+- **Key results:** Relativistic effects "increasingly enter as a design consideration" as frequencies, velocities, clock and bit rates rise (p. 1); closed-form models of relativistic clock rate and synchronisation for system designers (p. 1).
+- **Relevance:** RQ3 (quantified relativistic timekeeping in distributed systems); RQ4 (identifies distributed computing that needs time intervals, not only ordering, but gives no protocol model).
+- **Limitations:** 63-page tutorial; only the abstract, the distributed-computing section and the simultaneity passage were extracted.
+- **Extraction confidence:** medium
+
 ### messerschmitt2023
 - **Full reference:** D. Messerschmitt, I. Morrison, T. Mozdzen, P. Lubin. "Timing Relationships and Resulting Communications Challenges in Relativistic Travel." 2023. doi:10.1016/B978-0-323-91280-8.00012-5
 - **Communication model:** Photon-based messaging between an origin O and a destination D at rest in a common inertial frame and a spacecraft C with constant self-acceleration or an accelerate–decelerate "launch-landing" trajectory (p. 1). Each participant measures its own proper ("traveler's") time (p. 3). Responses are assumed immediate (p. 5).
@@ -290,6 +350,18 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Key results:** Registers, snapshots, lattice agreement and partially synchronous consensus are implementable "even when none of the available read quorums is strongly connected by correct channels", if some strongly connected write quorum is unidirectionally reachable from some read quorum (p. 2). The existence of a GQS is a tight bound on connectivity for partially synchronous consensus (p. 2).
 - **Relevance:** RQ1 (tight characterisation of tolerable channel failures, including asymmetric connectivity).
 - **Limitations:** Not leader-based SMR specifically; transfer to Raft requires protocol changes. The PDF is the arXiv extended version 2505.02646 (PODC 2025 version exists).
+- **Extraction confidence:** high
+
+### ng2023
+- **Full reference:** H. Ng, S. Haridi, P. Carbone. "Omni-Paxos: Breaking the Barriers of Partial Connectivity." ACM, 2023. doi:10.1145/3552326.3587441
+- **Communication model:** Partial network partitions in a crash-fault replicated state machine: quorum-loss (all servers connected only to A, leader C alive), constrained election (C fully partitioned; the only quorum-connected server has an outdated log), and chained (3 servers in a chain; the Cloudflare 2020 case) (pp. 2–3). Experiments over TCP with election timeouts of 50, 500 and 5000 ms and partitions of 1, 2 or 4 minutes (pp. 10–11).
+- **Properties analysed:** liveness/availability (down-time, decided operations); reconfiguration performance.
+- **Method:** protocol design (Omni-Paxos, Quorum-Connected Leader Election) and experiments comparing Raft (TiKV), Raft with PreVote and CheckQuorum, Multi-Paxos and VR (p. 10).
+- **Raft mechanisms and timing/clock assumptions as stated:** A leader must be quorum-connected; Raft additionally requires the maximum log (p. 2). Table 1: Raft fails the quorum-loss and chained scenarios (addressed by the PreVote/CheckQuorum patch) and the constrained-election scenario (not addressed) (p. 2). Raft's randomised timers can let other servers keep disrupting with higher terms (p. 3).
+- **Physical parameters:** not reported beyond timeouts and partition durations.
+- **Key results:** Omni-Paxos guarantees progress with a single quorum-connected server and recovers "in at most four election timeouts" under the tested partitions (p. 1, p. 2). Quorum-loss: Raft recovers with high variance; Raft PV+CQ recovers slightly faster than Omni-Paxos (pp. 10–11). Constrained election: Raft and Raft PV+CQ are down for the whole partition (p. 11). Reconfiguration up to 8× shorter with 46% less leader I/O (p. 1).
+- **Relevance:** RQ1 (partial-connectivity model, testbed); RQ2 (PreVote/CheckQuorum fix two scenarios but not the log-constrained one).
+- **Limitations:** Three hand-picked scenarios; implementation-level comparison.
 - **Extraction confidence:** high
 
 ### ongaro2014
@@ -410,4 +482,16 @@ Conventions: page numbers are PDF page numbers of the retrieved file (for the On
 - **Key results:** Versus Raft, average latency −39.81% and tail −49.44% (write-only), −32.90% and −49.24% (balanced) (p. 1); under Load workload average latency −34% to −41% versus four baselines (p. 7).
 - **Relevance:** RQ1 (WAN two-tier delay model; low relevance to timing assumptions).
 - **Limitations:** Latency optimisation only; network model is a fixed RTT structure. The PDF is the arXiv preprint (INFOCOM 2026 version exists).
+- **Extraction confidence:** medium
+
+### woos2016
+- **Full reference:** D. Woos, J. R. Wilcox, S. Anton et al. "Planning for Change in a Formal Verification of the Raft Consensus Protocol." ACM, 2016. doi:10.1145/2854065.2854081
+- **Communication model:** Verdi network semantics: a relation over pre- and post-network states encoding "what kinds of failure may occur" (p. 2); the Raft verification targets a semantics "that includes network and node failure"; the systems are designed to tolerate "node crashes and packet drops, duplication, and reordering" (p. 1, p. 2).
+- **Properties analysed:** safety only: state machine safety, and end-to-end linearizable state machine replication by connecting to earlier Verdi work (p. 1). Liveness not verified: "To date, we have only verified Raft's safety properties" (p. 4).
+- **Method:** machine-checked proof in Coq (Verdi framework); verified implementation extracted to OCaml and run on real networks (p. 1).
+- **Raft mechanisms and timing/clock assumptions as stated:** No timing assumptions in the safety proof (asynchronous network semantics). Leases and read optimisations: not reported.
+- **Physical parameters:** not applicable.
+- **Key results:** 90 system invariants proved (p. 1); 530 lines of code and 50,000 lines of proof, excluding the Verdi core (p. 5). The verified Raft omits dynamic reconfiguration and log compaction (p. 5).
+- **Relevance:** RQ1 (machine-checked safety of Raft under a lossy, duplicating, reordering network).
+- **Limitations:** Safety only; no reconfiguration or compaction. The full text was read in the browser through the ACM free-access PDF, text extracted in-page; the PDF itself could not be saved locally, so only targeted passages were read.
 - **Extraction confidence:** medium
